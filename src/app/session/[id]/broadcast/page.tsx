@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, use } from "react";
 import {
   LiveKitRoom,
-  RoomAudioRenderer,
   useLocalParticipant,
   useRoomContext,
   useRemoteParticipants,
@@ -275,7 +274,7 @@ export default function BroadcastPage({
           window.location.href = "/";
         }}
       >
-        <RoomAudioRenderer />
+
         <BroadcastControls sessionId={sessionId} />
       </LiveKitRoom>
     </div>

@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback, useRef, use } from "react";
 import {
   LiveKitRoom,
+  RoomAudioRenderer,
   useRoomContext,
   useTracks,
   useRemoteParticipants,
-  AudioTrack,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
@@ -29,6 +29,7 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const currentLanguageRef = useRef(currentLanguage);
   const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
 
@@ -53,7 +54,8 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
         const data = JSON.parse(new TextDecoder().decode(payload));
         if (data.type !== "transcription") return;
 
-        console.log("[Watch] Transcription data:", data);
+        // Only show transcriptions for the currently selected language
+        if (data.language !== currentLanguageRef.current) return;
 
         setTranscripts((prev) => {
           const existing = prev.findIndex((t) => t.id === data.segmentId);
@@ -95,8 +97,8 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   }, [transcripts]);
 
   // Manage which audio tracks are subscribed based on selected language
-  // autoSubscribe is true (default) so transcription data flows over data channel,
-  // but we selectively unsubscribe audio tracks we don't want to hear
+  // autoSubscribe: false means nothing plays by default
+  // We explicitly subscribe only to the selected language's track
   useEffect(() => {
     if (!room) return;
 
@@ -122,7 +124,6 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
 
     updateSubscriptions();
 
-    // Re-run when new tracks are published or participants join
     const handleUpdate = () => updateSubscriptions();
     room.on(RoomEvent.TrackPublished, handleUpdate);
     room.on(RoomEvent.ParticipantConnected, handleUpdate);
@@ -152,6 +153,7 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   const handleLanguageChange = useCallback(
     (langCode: string, newTranslatorIdentity: string | null) => {
       setCurrentLanguage(langCode);
+      currentLanguageRef.current = langCode;
       setTranslatorIdentity(newTranslatorIdentity);
       // Clear transcripts when switching languages
       setTranscripts([]);
@@ -269,30 +271,6 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   );
 }
 
-/**
- * Custom audio renderer that only plays enabled tracks.
- * Unlike RoomAudioRenderer which plays ALL subscribed tracks,
- * this only renders <audio> for tracks where track.isEnabled is true.
- */
-function SelectiveAudioRenderer() {
-  const tracks = useTracks([Track.Source.Microphone]);
-
-  // Only render audio for tracks that are subscribed
-  const subscribedTracks = tracks.filter(
-    (t) => t.publication?.isSubscribed
-  );
-
-  return (
-    <div style={{ display: "none" }}>
-      {subscribedTracks.map((trackRef) => (
-        <AudioTrack
-          key={trackRef.publication.trackSid}
-          trackRef={trackRef}
-        />
-      ))}
-    </div>
-  );
-}
 
 export default function WatchPage({
   params,
@@ -385,6 +363,7 @@ export default function WatchPage({
         audio={false}
         token={token}
         serverUrl={livekitUrl}
+        connectOptions={{ autoSubscribe: false }}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -392,7 +371,7 @@ export default function WatchPage({
           width: "100%",
         }}
       >
-        <SelectiveAudioRenderer />
+        <RoomAudioRenderer />
         <AttendeeView sessionId={sessionId} />
       </LiveKitRoom>
     </div>

@@ -57,6 +57,8 @@ export class TranslationBridge {
 
   private geminiSetupComplete: boolean = false;
   private organizerIdentity: string;
+  private lastAudioFrameTime: number = 0;
+  private captureChain: Promise<void> = Promise.resolve();
 
   constructor(
     sessionId: string,
@@ -385,8 +387,8 @@ export class TranslationBridge {
                 `[TranslationBridge:${this.targetLanguage}] Received audio frame #${this.framesReceivedFromGemini} from Gemini (${part.inlineData.data.length} bytes base64)`
               );
             }
-            // Decode base64 PCM audio from Gemini and publish to LiveKit
-            this.publishTranslatedAudio(part.inlineData.data);
+            // Queue frame for sequential capture (avoid promise pile-up)
+            this.queueAudioFrame(part.inlineData.data);
           }
         }
       }
@@ -415,33 +417,47 @@ export class TranslationBridge {
     }
   }
 
+  /**
+   * Queue an audio frame for sequential capture.
+   * Chains each captureFrame call to avoid promise pile-up.
+   */
+  private queueAudioFrame(base64Audio: string): void {
+    this.captureChain = this.captureChain.then(() =>
+      this.publishTranslatedAudio(base64Audio)
+    );
+  }
+
   private async publishTranslatedAudio(base64Audio: string): Promise<void> {
     if (!this.audioSource || this.status === "closed") return;
 
     try {
-      // Decode base64 to raw PCM bytes
       const pcmBuffer = Buffer.from(base64Audio, "base64");
-
-      // Create Int16Array view of the PCM data
-      // Gemini outputs 16-bit signed PCM at 24kHz mono
       const int16 = new Int16Array(
         pcmBuffer.buffer,
         pcmBuffer.byteOffset,
         pcmBuffer.byteLength / 2
       );
-      const samples = int16.length;
 
-      const frame = new AudioFrame(int16, this.sampleRate, this.channels, samples);
+      const frame = new AudioFrame(int16, this.sampleRate, this.channels, int16.length);
       await this.audioSource.captureFrame(frame);
+
+      const now = Date.now();
+      if (this.lastAudioFrameTime && now - this.lastAudioFrameTime > 2000) {
+        console.log(
+          `[TranslationBridge:${this.targetLanguage}] Audio resumed after ${now - this.lastAudioFrameTime}ms gap (frame #${this.framesReceivedFromGemini})`
+        );
+      }
+      this.lastAudioFrameTime = now;
     } catch (error: unknown) {
-      // Suppress InvalidState errors when the track has been closed/detached
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes("InvalidState")) {
-        // Track was closed — stop trying
+      if (msg.includes("InvalidState") || msg.includes("closed")) {
+        console.warn(
+          `[TranslationBridge:${this.targetLanguage}] AudioSource closed — stopping capture`
+        );
         this.audioSource = null;
       } else {
         console.error(
-          `[TranslationBridge:${this.targetLanguage}] Error publishing translated audio:`,
+          `[TranslationBridge:${this.targetLanguage}] Error capturing audio frame:`,
           error
         );
       }
