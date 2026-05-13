@@ -1,36 +1,122 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Live Translate
 
-## Getting Started
+Real-time broadcast translation powered by the Gemini Live API and LiveKit.
 
-First, run the development server:
+An organizer speaks into their mic — attendees pick a language and hear a live AI translation. Each language spins up exactly one Gemini Live API session, shared across all listeners requesting that language.
+
+## How it works
+
+```
+Organizer → publishes audio → LiveKit room
+                                  ↓
+              TranslationBridge (per language)
+              joins room as bot, subscribes to organizer audio
+                                  ↓
+              Gemini Live API (streamingTranslationConfig)
+              directionalTranslation → targetLanguageCode
+                                  ↓
+              Translated audio published back to LiveKit
+                                  ↓
+Attendee → subscribes to translator-{lang} audio track
+```
+
+## Prerequisites
+
+- Node.js 18+
+- A [Gemini API key](https://aistudio.google.com/apikey)
+- A running LiveKit server (local or cloud)
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Start a local LiveKit server
+
+The easiest way is with Docker:
+
+```bash
+docker run -d \
+  --name livekit \
+  -p 7880:7880 \
+  -p 7881:7881 \
+  -p 7882:7882/udp \
+  -e LIVEKIT_KEYS="devkey: secret" \
+  livekit/livekit-server \
+  --dev
+```
+
+Or install the LiveKit CLI and run locally:
+
+```bash
+# Install (macOS)
+brew update && brew install livekit
+
+# Run
+livekit-server --dev --bind 0.0.0.0
+```
+
+The default dev keys are `devkey` / `secret`, matching `.env.local`.
+
+### 3. Configure environment
+
+Edit `.env.local`:
+
+```env
+LIVEKIT_API_KEY=devkey
+LIVEKIT_API_SECRET=secret
+NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
+LIVEKIT_URL=ws://localhost:7880
+GEMINI_API_KEY=your-gemini-api-key-here
+```
+
+### 4. Run the app
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Click **Create session** — you'll be taken to the broadcast page
+2. Allow microphone access and start speaking
+3. Share the QR code (or URL) with attendees
+4. Attendees open the link, pick a language from the dropdown
+5. The server spins up a Gemini Live API translation bridge for that language
+6. Subsequent attendees requesting the same language share the existing bridge
 
-## Learn More
+## Project structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── sessions/          # Create/list/delete sessions
+│   │   ├── token/             # LiveKit token generation
+│   │   └── translate/         # Request translations, check status
+│   ├── session/[id]/
+│   │   ├── broadcast/         # Organizer view
+│   │   └── watch/             # Attendee view + language selector
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx               # Landing page
+├── components/
+│   └── SessionQRCode.tsx
+└── lib/
+    ├── languages.ts                    # Supported languages
+    ├── translation-bridge.ts           # LiveKit ↔ Gemini bridge
+    └── translation-session-manager.ts  # Singleton: max 1 session/lang
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Key design decisions
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Audio only** — no video, keeps things simple and bandwidth-light
+- **`streamingTranslationConfig`** — uses Gemini's native directional translation, not prompt-based
+- **`@livekit/rtc-node`** — server-side bot joins the room programmatically (not a browser)
+- **Singleton per language** — `TranslationSessionManager` ensures at most one Gemini session per language per room
+- **Attendee audio switching** — client mutes organizer audio and subscribes to translator bot's track when a language is selected

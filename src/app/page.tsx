@@ -1,66 +1,106 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function createSession() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizerName: "host" }),
+      });
+      const data = await res.json();
+      router.push(`/session/${data.sessionId}/broadcast`);
+    } catch (err) {
+      console.error("Failed to create session:", err);
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="page">
+      <div className="container" style={{ textAlign: "center" }}>
+        {/* Title */}
+        <h1 className="display display-xl enter" style={{ marginBottom: 24 }}>
+          <em>Live</em> Translate
+        </h1>
+
+        {/* Subtitle */}
+        <p
+          className="body enter-d1"
+          style={{ maxWidth: 340, margin: "0 auto 48px" }}
+        >
+          Broadcast your voice. Attendees choose their language.
+          Translation spins up on demand.
+        </p>
+
+        {/* CTA */}
+        <div className="enter-d2">
+          <button
+            className="btn btn-dark"
+            onClick={createSession}
+            disabled={loading}
+            id="create-session-btn"
           >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {loading ? (
+              <>
+                <span className="spinner" /> Creating…
+              </>
+            ) : (
+              "Create session"
+            )}
+          </button>
         </div>
-      </main>
+
+        {/* Steps */}
+        <div
+          className="enter-d3"
+          style={{
+            marginTop: 80,
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+            textAlign: "left",
+          }}
+        >
+          <hr className="rule" />
+          {[
+            "Speak into your microphone — your audio goes live",
+            "Share the QR code with your audience",
+            "Each language picked spins up one Gemini session",
+          ].map((text, i) => (
+            <div key={i}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 16,
+                  padding: "18px 0",
+                  alignItems: "baseline",
+                }}
+              >
+                <span className="mono" style={{ flexShrink: 0 }}>
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <p className="body-sm" style={{ color: "var(--fg-secondary)" }}>
+                  {text}
+                </p>
+              </div>
+              <hr className="rule" />
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <p className="mono enter-d4" style={{ marginTop: 48 }}>
+          Powered by Gemini Live API + LiveKit
+        </p>
+      </div>
     </div>
   );
 }
