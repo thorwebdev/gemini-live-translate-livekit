@@ -17,10 +17,6 @@ from config import (
     GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF,
     GEMINI_MODEL,
     GEMINI_RECONNECT_BACKOFF_SEC,
-    TRACK_ATTR_KIND,
-    TRACK_ATTR_SOURCE_IDENTITY,
-    TRACK_ATTR_TARGET_LANG,
-    TRANSLATION_TRACK_KIND,
 )
 
 logger = logging.getLogger("translator.session")
@@ -34,9 +30,8 @@ class GeminiSession:
         and starts the in/out audio pumps.
       - `aclose()` tears everything down. Idempotent.
       - On Gemini errors, the session reconnects with exponential backoff. After
-        `GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF` consecutive failures the track is
-        marked as `error_state="failed"` until external action (e.g., a router
-        reconcile triggered by a listener language change) recreates the session.
+        `GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF` consecutive failures it logs at
+        ERROR level and keeps retrying with the longest backoff in the schedule.
     """
 
     def __init__(
@@ -77,15 +72,10 @@ class GeminiSession:
         )
         self._track_sid = pub.sid
 
-        # Track attributes for frontend subscription routing.
-        await self._room.local_participant.update_published_track_attributes(
-            pub.sid,
-            {
-                TRACK_ATTR_KIND: TRANSLATION_TRACK_KIND,
-                TRACK_ATTR_SOURCE_IDENTITY: self._speaker_identity,
-                TRACK_ATTR_TARGET_LANG: self._target_lang,
-            },
-        )
+        # Track-level attributes aren't yet exposed in this version of the
+        # livekit Python/JS SDKs, so routing is keyed off the track NAME
+        # ("tx:<speaker>:<lang>") which the frontend parses. See
+        # src/app/session/[id]/room/useTranslationRouting.ts.
 
         logger.info(
             "started translator track sid=%s name=%s for %s -> %s",
@@ -153,7 +143,12 @@ class GeminiSession:
                     self._consecutive_failures
                     >= GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF
                 ):
-                    await self._set_track_attr_error("failed")
+                    logger.error(
+                        "Gemini session %s -> %s failed %d times; will keep retrying with long backoff",
+                        self._speaker_identity,
+                        self._target_lang,
+                        self._consecutive_failures,
+                    )
                 logger.warning(
                     "Gemini session error (%s -> %s) attempt #%d: %s; backing off %.2fs",
                     self._speaker_identity,
@@ -180,7 +175,6 @@ class GeminiSession:
                 self._target_lang,
             )
             self._consecutive_failures = 0
-            await self._clear_track_attr_error()
 
             send_task = asyncio.create_task(
                 self._pump_input(session), name="gemini-input"
@@ -276,31 +270,3 @@ class GeminiSession:
             await writer.aclose()
         except Exception as exc:
             logger.debug("text-stream publish failed: %s", exc)
-
-    async def _set_track_attr_error(self, state: str) -> None:
-        if not self._track_sid:
-            return
-        with contextlib.suppress(Exception):
-            await self._room.local_participant.update_published_track_attributes(
-                self._track_sid,
-                {
-                    TRACK_ATTR_KIND: TRANSLATION_TRACK_KIND,
-                    TRACK_ATTR_SOURCE_IDENTITY: self._speaker_identity,
-                    TRACK_ATTR_TARGET_LANG: self._target_lang,
-                    "error_state": state,
-                },
-            )
-
-    async def _clear_track_attr_error(self) -> None:
-        if not self._track_sid:
-            return
-        with contextlib.suppress(Exception):
-            await self._room.local_participant.update_published_track_attributes(
-                self._track_sid,
-                {
-                    TRACK_ATTR_KIND: TRANSLATION_TRACK_KIND,
-                    TRACK_ATTR_SOURCE_IDENTITY: self._speaker_identity,
-                    TRACK_ATTR_TARGET_LANG: self._target_lang,
-                    "error_state": "",
-                },
-            )
