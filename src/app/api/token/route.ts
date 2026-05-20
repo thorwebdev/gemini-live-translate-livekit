@@ -1,47 +1,76 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AccessToken } from "livekit-server-sdk";
+import {
+  AccessToken,
+  RoomConfiguration,
+  RoomAgentDispatch,
+} from "livekit-server-sdk";
 
-// GET /api/token — Generate a LiveKit access token
+// Session caps (mirrors src/lib/config.ts on the client). Hardcoded here to
+// avoid a runtime import cycle; keep these in sync if you change them in one place.
+const SESSION_TTL_SECONDS = 4 * 60 * 60; // 4h hard cap per grill Q21
+const EMPTY_ROOM_TIMEOUT = 60; // close empty rooms after 60s
+const DEPARTURE_TIMEOUT = 30; // close after last person leaves
+const MAX_PARTICIPANTS = 8; // room cap per grill Q21
+const TRANSLATOR_AGENT_NAME = "translator";
+
 export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get("room");
   const identity = req.nextUrl.searchParams.get("identity");
-  const role = req.nextUrl.searchParams.get("role") || "attendee";
+  const displayName =
+    req.nextUrl.searchParams.get("name")?.trim() || identity || "";
 
   if (!room || !identity) {
     return NextResponse.json(
       { error: "Missing room or identity parameter" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const serverUrl = process.env.LIVEKIT_URL;
 
-  if (!apiKey || !apiSecret) {
+  if (!apiKey || !apiSecret || !serverUrl) {
     return NextResponse.json(
       { error: "LiveKit credentials not configured" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
   const at = new AccessToken(apiKey, apiSecret, {
     identity,
-    name: identity,
-    ttl: "4h",
+    name: displayName,
+    ttl: SESSION_TTL_SECONDS,
   });
 
-  const isOrganizer = role === "organizer";
-
+  // Peer model (grill Q7): every participant can publish audio + video and
+  // subscribe; can update their own attributes (used to broadcast their
+  // chosen language to the agent + other peers).
   at.addGrant({
     roomJoin: true,
     room,
-    canPublish: isOrganizer,
+    canPublish: true,
+    canPublishData: true,
     canSubscribe: true,
-    canPublishData: isOrganizer,
+    canUpdateOwnMetadata: true,
+  });
+
+  // Dispatch the Python translator agent when the room is created (grill Q9).
+  // RoomConfiguration is only applied on first creation; subsequent token
+  // mints for an existing room are ignored by LiveKit. So idempotent.
+  at.roomConfig = new RoomConfiguration({
+    agents: [
+      new RoomAgentDispatch({
+        agentName: TRANSLATOR_AGENT_NAME,
+        metadata: JSON.stringify({ sessionId: room }),
+      }),
+    ],
+    emptyTimeout: EMPTY_ROOM_TIMEOUT,
+    departureTimeout: DEPARTURE_TIMEOUT,
+    maxParticipants: MAX_PARTICIPANTS,
   });
 
   const token = await at.toJwt();
-  const serverUrl = process.env.LIVEKIT_URL || "ws://localhost:7880";
 
   return NextResponse.json({ token, serverUrl });
 }

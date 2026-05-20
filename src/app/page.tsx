@@ -7,20 +7,10 @@ export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  async function createSession() {
+  function createSession() {
     setLoading(true);
-    try {
-      const res = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizerName: "host" }),
-      });
-      const data = await res.json();
-      router.push(`/session/${data.sessionId}/broadcast`);
-    } catch (err) {
-      console.error("Failed to create session:", err);
-      setLoading(false);
-    }
+    const sessionId = crypto.randomUUID();
+    router.push(`/session/${sessionId}`);
   }
 
   return (
@@ -36,7 +26,7 @@ export default function Home() {
           className="body enter-d1"
           style={{ maxWidth: 340, margin: "0 auto 48px" }}
         >
-          Broadcast your voice. Attendees choose their language.
+          Multi-language video calls. Everyone picks their language.
           Translation spins up on demand.
         </p>
 
@@ -71,9 +61,9 @@ export default function Home() {
         >
           <hr className="rule" />
           {[
-            "Speak into your microphone — your audio goes live",
-            "Share the QR code with your audience",
-            "Each language picked spins up one Gemini session",
+            "Pick your language and turn on your camera",
+            "Share the link with everyone joining the call",
+            "Each language pair spins up one Gemini session on demand",
           ].map((text, i) => (
             <div key={i}>
               <div
