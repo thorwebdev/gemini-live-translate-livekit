@@ -1,238 +1,153 @@
 # Live Translate
 
-Real-time broadcast translation powered by the Gemini Live API and LiveKit.
+Multi-language video calls. Everyone picks their language. Translation spins up on demand.
 
-An organizer speaks into their mic — attendees pick a language and hear a live AI translation. Each language spins up exactly one Gemini Live API session, shared across all listeners requesting that language.
+Powered by [LiveKit Agents](https://docs.livekit.io/agents/) (Python worker) and the [Gemini Live API](https://ai.google.dev/gemini-api/docs/live).
+
+![architecture](https://img.shields.io/badge/architecture-peer--call-1A1917) ![agent](https://img.shields.io/badge/agent-python-3776AB) ![web](https://img.shields.io/badge/web-nextjs-000000)
+
+---
+
+## What it does
+
+Anyone with the link joins as a peer. Each participant picks one language — that's what they speak **and** what they want to hear everyone else in. When someone speaks, a Gemini Live session translates their audio into every other distinct language present in the room, on demand. Same-language pairs hear each other natively, no Gemini cost.
+
+- 8-person rooms by default (configurable)
+- 16 supported languages plus "None — native passthrough"
+- Camera + mic default off; toggle on when you're ready
+- Captions sidebar (per listener, in their chosen language) with auto-scroll transcripts
+- LiveKit Cloud Agents-ready: deploy the Python worker, the frontend dispatches it via room config on token mint
 
 ## How it works
 
 ```
-Organizer → publishes audio → LiveKit room
-                                  ↓
-              TranslationBridge (per language)
-              joins room as bot, subscribes to organizer audio
-                                  ↓
-              Gemini Live API (streamingTranslationConfig)
-              directionalTranslation → targetLanguageCode
-                                  ↓
-              Translated audio published back to LiveKit
-                                  ↓
-Attendee → subscribes to translator-{lang} audio track
+                    ┌─────────────────────────────┐
+                    │       LiveKit Room          │
+                    │                             │
+   Alice (EN) ─────▶│  mic + camera tracks        │◀──── Bob (ES)
+                    │                             │
+                    │  ┌───────────────────────┐  │
+                    │  │ Translator agent      │  │
+                    │  │ (Python worker)       │  │
+                    │  │                       │  │
+                    │  │ tx:alice:es  ─audio─┐ │  │
+                    │  │ tx:bob:en    ─audio─┤ │  │
+                    │  │                     │ │  │
+                    │  │ TextStream("lk.translation",
+                    │  │   target_lang=es, ...)  │
+                    │  └───────────────────────┘  │
+                    └─────────────────────────────┘
+                                  │
+                ▼                                    ▼
+   Alice subscribes to                Bob subscribes to
+   tx:bob:en  (en translation)        tx:alice:es  (es translation)
 ```
 
-## Prerequisites
+Each participant's chosen language lives in their LiveKit `attributes.lang`. The Python agent watches `participantAttributesChanged`, reconciles a `(speaker, target_lang)` session map, and publishes one translator track per pair (skipping pairs where source == target). The frontend subscribes to either the native mic or the matching translator track based on the same predicate.
 
-- Node.js 18+
+## Quick start
+
+You need:
+- Node.js 20+, npm
+- Python 3.11+, [uv](https://docs.astral.sh/uv/)
+- A [LiveKit Cloud](https://cloud.livekit.io) project (free tier works)
 - A [Gemini API key](https://aistudio.google.com/apikey)
-- A running LiveKit server (local or cloud)
-
-## Setup
-
-### 1. Install dependencies
 
 ```bash
+# 1. Set up env — both the web app and the agent need credentials
+cat > .env.local <<EOF
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=
+LIVEKIT_API_SECRET=
+GEMINI_API_KEY=
+EOF
+cp .env.local translator/.env.local
+
+# 2. Install
 npm install
+(cd translator && uv sync)
+
+# 3. Run both processes in two terminals
+npm run dev                                          # Next.js on :3000
+(cd translator && uv run python src/agent.py dev)    # Agent worker
 ```
 
-### 2. Start a local LiveKit server
+Open <http://localhost:3000>, click **Create session**, share the URL with another browser, pick different languages, unmute.
 
-The easiest way is with Docker:
+## Repo layout
 
+```
+gemini-live-translate-livekit/
+├── src/                                # Next.js 16 frontend
+│   ├── app/
+│   │   ├── page.tsx                    # Landing
+│   │   ├── api/token/route.ts          # Mints token + dispatches translator agent
+│   │   └── session/[id]/
+│   │       ├── page.tsx                # Pre-flight (name + language)
+│   │       └── room/                   # In-call UI
+│   │           ├── RoomClient.tsx
+│   │           ├── InCall.tsx
+│   │           ├── VideoGrid.tsx       + ParticipantTile, SelfView
+│   │           ├── ControlBar.tsx      + LanguagePill
+│   │           ├── CaptionsSidebar.tsx
+│   │           └── useTranslationRouting.ts
+│   └── lib/
+│       ├── languages.ts                # 16 languages + "none" sentinel
+│       └── config.ts                   # Caps, attribute keys
+└── translator/                         # Python LiveKit Agents worker
+    ├── src/
+    │   ├── agent.py                    # @server.rtc_session(agent_name="translator")
+    │   ├── router.py                   # TranslationRouter (reconcile loop)
+    │   ├── session.py                  # GeminiSession (one per speaker→target pair)
+    │   ├── audio.py                    # PCM glue
+    │   └── config.py                   # Model id, debounce, grace, etc.
+    ├── tests/test_router.py            # Demand-set computation
+    ├── pyproject.toml
+    ├── Dockerfile                      # For LiveKit Cloud Agents deploy
+    └── livekit.toml
+```
+
+## Deploy
+
+**Agent** — to LiveKit Cloud Agents:
 ```bash
-docker run -d \
-  --name livekit \
-  -p 7880:7880 \
-  -p 7881:7881 \
-  -p 7882:7882/udp \
-  -e LIVEKIT_KEYS="devkey: secret" \
-  livekit/livekit-server \
-  --dev
+cd translator
+lk agent create --secrets-file .env.local .   # first time
+lk agent deploy                               # subsequent deploys
 ```
 
-Or install the LiveKit CLI and run locally:
+**Frontend** — anywhere that runs Next.js. The repo includes a `Dockerfile` for container deploys (Cloud Run, Fly.io, Render, etc.). For Vercel, no special config needed since the only API route is `/api/token` and it's stateless.
 
-```bash
-# Install (macOS)
-brew update && brew install livekit
+Set on the frontend host:
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
 
-# Run
-livekit-server --dev --bind 0.0.0.0
-```
+Set on the agent host:
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `GEMINI_API_KEY`
 
-The default dev keys are `devkey` / `secret`, matching `.env.local`.
+## Configuration
 
-### 3. Configure environment
+Caps in `src/lib/config.ts` and `translator/src/config.py` — adjust together:
 
-Edit `.env.local`:
+| Setting | Default | Where |
+|---|---|---|
+| Max participants per room | 8 | `MAX_PARTICIPANTS` (token route) |
+| Session TTL | 4h | token route `ttl` |
+| Empty-room timeout | 60s | token route |
+| Idle disconnect | 15min | client (TBD) |
+| Session grace on mute | 10s | `SESSION_GRACE_SEC` (agent) |
+| Reconcile debounce | 250ms | `RECONCILE_DEBOUNCE_SEC` (agent) |
+| Gemini model | `gemini-3.1-flash-lite-live-translate` | `GEMINI_MODEL` (agent) |
 
-```env
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret
-NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
-LIVEKIT_URL=ws://localhost:7880
-GEMINI_API_KEY=your-gemini-api-key-here
-```
+## Tech stack
 
-### 4. Run the app
+- **Frontend** — Next.js 16 (Turbopack), React 19, `@livekit/components-react`, `livekit-client`
+- **Token mint** — `livekit-server-sdk` (`RoomAgentDispatch` + `RoomConfiguration`)
+- **Agent runtime** — `livekit-agents` 1.5 with `AgentServer.rtc_session()`
+- **Translation** — `google-genai` Live API (`client.aio.live.connect()` with `streamingTranslationConfig`)
+- **Audio I/O** — `livekit.rtc.AudioStream` (16 kHz mono in) + `AudioSource` (24 kHz mono out)
+- **Typography** — Instrument Serif (display), DM Sans (body), DM Mono (status)
+- **Package management** — `npm` + `uv`
 
-```bash
-npm run dev
-```
+## License
 
-Open [http://localhost:3000](http://localhost:3000).
-
-## Deploy to Cloud Run
-
-> **Note:** This app cannot be deployed to Vercel. The translation bridges are long-running processes (WebSocket connections to Gemini and LiveKit) that exceed Vercel's serverless function timeout limits. Cloud Run supports long-running requests and persistent containers.
-
-### Prerequisites
-
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`)
-- A [LiveKit Cloud](https://cloud.livekit.io) account (free tier: 50 participant-hours/month)
-
-### Deploy
-
-First, create secrets in Google Secret Manager (reads values from your `.env.local`):
-
-```bash
-source <(grep -v '^#' .env.local | sed 's/^/export /')
-
-echo -n "$GEMINI_API_KEY" | gcloud secrets create gemini-api-key --data-file=-
-echo -n "$LIVEKIT_API_KEY" | gcloud secrets create livekit-api-key --data-file=-
-echo -n "$LIVEKIT_API_SECRET" | gcloud secrets create livekit-api-secret --data-file=-
-```
-
-Then deploy:
-
-```bash
-gcloud run deploy live-translate \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --min-instances 1 \
-  --max-instances 1 \
-  --timeout 3600 \
-  --no-cpu-throttling \
-  --set-secrets "\
-GEMINI_API_KEY=gemini-api-key:latest,\
-LIVEKIT_API_KEY=livekit-api-key:latest,\
-LIVEKIT_API_SECRET=livekit-api-secret:latest" \
-  --set-env-vars "\
-NEXT_PUBLIC_LIVEKIT_URL=wss://your-project.livekit.cloud,\
-LIVEKIT_URL=wss://your-project.livekit.cloud"
-```
-
-Key settings:
-- `--set-secrets` — injects secrets from Secret Manager at runtime (never stored in the image or Cloud Run config)
-- `--min-instances 1` — keeps the container warm so active sessions aren't killed
-- `--max-instances 1` — the `TranslationSessionManager` singleton requires a single instance
-- `--timeout 3600` — allows sessions up to 1 hour
-- `--no-cpu-throttling` — keeps CPU allocated between requests (needed for audio processing)
-
-### Authentication (optional)
-
-To restrict access to specific Google accounts, enable Identity-Aware Proxy (IAP). This adds a Google Sign-In page — only authorized users can access the app.
-
-```bash
-gcloud run services update live-translate --region us-central1 --iap
-```
-
-See [docs/authentication.md](docs/authentication.md) for full setup instructions.
-
-## Usage
-
-1. Click **Create session** — you'll be taken to the broadcast page
-2. Allow microphone access and start speaking
-3. Share the QR code (or URL) with attendees
-4. Attendees open the link, pick a language from the dropdown
-5. The server spins up a Gemini Live API translation bridge for that language
-6. Subsequent attendees requesting the same language share the existing bridge
-
-## Project structure
-
-```
-src/
-├── app/
-│   ├── api/
-│   │   ├── sessions/          # Create/list/delete sessions
-│   │   ├── token/             # LiveKit token generation
-│   │   └── translate/         # Request translations, check status
-│   ├── session/[id]/
-│   │   ├── broadcast/         # Organizer view
-│   │   └── watch/             # Attendee view + language selector
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx               # Landing page
-├── components/
-│   └── SessionQRCode.tsx
-└── lib/
-    ├── languages.ts                    # Supported languages
-    ├── translation-bridge.ts           # LiveKit ↔ Gemini bridge
-    └── translation-session-manager.ts  # Singleton: max 1 session/lang
-```
-
-## Key design decisions
-
-- **Audio only** — no video, keeps things simple and bandwidth-light
-- **`streamingTranslationConfig`** — uses Gemini's native directional translation, not prompt-based
-- **`@livekit/rtc-node`** — server-side bot joins the room programmatically (not a browser)
-- **Singleton per language** — `TranslationSessionManager` ensures at most one Gemini session per language per room
-- **Attendee audio switching** — client uses `setSubscribed()` to subscribe only to the selected translator bot's audio track
-- **Reliable transcription delivery** — transcriptions are sent via `publishData` (reliable data channel), not tied to audio track subscription state
-- **Tab close cleanup** — `navigator.sendBeacon()` fires on `beforeunload` to decrement subscriber counts and tear down idle Gemini sessions
-- **Serial audio frame queue** — `captureFrame` calls are chained via a promise chain to avoid frame pile-up in the AudioSource FFI layer
-
-## Architecture & scaling
-
-### Current design (demo)
-
-All participants — organizer, translator bots, and attendees — share a **single LiveKit room**. Attendees use `setSubscribed()` to hear only their selected language.
-
-```
-                    ┌─────────────────────┐
-                    │    LiveKit Room      │
-                    │                     │
-  Organizer ──────▶ │  translator-fr ─┐   │ ◀── Attendee (FR)
-                    │  translator-de ─┤   │ ◀── Attendee (DE)
-                    │  translator-zh ─┘   │ ◀── Attendee (ZH)
-                    └─────────────────────┘
-```
-
-**This works well for:**
-- Up to ~15-20 simultaneous languages
-- Up to ~50 attendees on a dev server, or ~200-300 on LiveKit Cloud
-
-**Limitations:**
-- **Signaling fan-out is O(n)**: every participant join/leave notifies all others. With 1000 attendees, each join sends ~1000 signaling messages.
-- **Track publication overhead**: each attendee receives metadata for all published tracks (even the ones they don't subscribe to).
-- **Single Node.js process**: all Gemini WebSocket connections and audio pipelines run in one process.
-
-### Recommended production architecture
-
-For large-scale deployments (100+ attendees, 20+ languages), use a **3-tier design** with per-language delivery rooms:
-
-```
-Tier 1 — Ingestion            Tier 2 — Translation         Tier 3 — Delivery
-┌──────────────┐             ┌──────────────────┐         ┌─────────────────┐
-│  Main Room   │             │  Worker (FR)     │         │  Room: sess-fr  │
-│              │  subscribe  │  Gemini Live API │ publish │                 │
-│  Organizer ──┼────────────▶│  FR translation  ├────────▶│  67 attendees   │
-│  (publishes  │             └──────────────────┘         └─────────────────┘
-│   audio)     │             ┌──────────────────┐         ┌─────────────────┐
-│              │  subscribe  │  Worker (DE)     │ publish │  Room: sess-de  │
-│              ├────────────▶│  Gemini Live API ├────────▶│  67 attendees   │
-│              │             └──────────────────┘         └─────────────────┘
-│              │             ┌──────────────────┐         ┌─────────────────┐
-│              │  subscribe  │  Worker (ZH)     │ publish │  Room: sess-zh  │
-│              ├────────────▶│  Gemini Live API ├────────▶│  67 attendees   │
-└──────────────┘             └──────────────────┘         └─────────────────┘
-```
-
-**Benefits:**
-- **Isolated failure domains** — a worker crash only affects one language
-- **Horizontal scaling** — workers are stateless, deploy via Kubernetes/Cloud Run
-- **No signaling storm** — each delivery room has 1 publisher + N attendees (no N² problem)
-- **Unlimited languages** — each language is a separate, independently scaled room
-- **CDN-ready** — for 10K+ viewers, use LiveKit Egress → HLS → CDN on the delivery rooms
-
-**Tradeoff:** switching languages requires a room reconnection (~200ms audio gap), vs. instant subscription toggle in the single-room design.
+MIT
