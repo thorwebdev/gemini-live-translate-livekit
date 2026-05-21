@@ -1,124 +1,109 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useIsSpeaking,
   useParticipantAttributes,
 } from "@livekit/components-react";
 import { Track, type RemoteParticipant } from "livekit-client";
-import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+import { NATIVE_LANG, PARTICIPANT_LANG_ATTR } from "@/lib/config";
 import { getLanguageByCode } from "@/lib/languages";
+import { MicOffIcon } from "./icons";
 
 export default function ParticipantTile({
   participant,
+  myLang,
 }: {
   participant: RemoteParticipant;
+  myLang: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [micOn, setMicOn] = useState(false);
   const isSpeaking = useIsSpeaking(participant);
   const { attributes } = useParticipantAttributes({ participant });
-  const lang = attributes?.[PARTICIPANT_LANG_ATTR];
-  const langInfo = lang ? getLanguageByCode(lang) : undefined;
+  const speakerLang = attributes?.[PARTICIPANT_LANG_ATTR];
+  const langInfo = speakerLang ? getLanguageByCode(speakerLang) : undefined;
 
-  // Attach the camera track to a <video> manually. (We avoid the prebuilt
-  // ParticipantTile because it pulls audio routing we don't want.)
+  // True iff we should be hearing their voice via the agent's translator
+  // track right now — i.e., we want translation AND their lang differs.
+  const needsTranslation =
+    myLang !== NATIVE_LANG && !!speakerLang && speakerLang !== myLang;
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const attach = () => {
+    const sync = () => {
+      let cam = false;
+      let mic = false;
       for (const pub of participant.videoTrackPublications.values()) {
-        if (pub.source === Track.Source.Camera && pub.track) {
+        if (pub.source === Track.Source.Camera && pub.track && !pub.isMuted) {
           pub.track.attach(video);
-          return;
+          cam = true;
         }
       }
-      video.srcObject = null;
-    };
-
-    const detach = () => {
-      for (const pub of participant.videoTrackPublications.values()) {
-        if (pub.source === Track.Source.Camera && pub.track) {
-          pub.track.detach(video);
+      for (const pub of participant.audioTrackPublications.values()) {
+        if (pub.source === Track.Source.Microphone && !pub.isMuted) {
+          mic = true;
         }
       }
+      if (!cam) video.srcObject = null;
+      setCameraOn(cam);
+      setMicOn(mic);
     };
 
-    attach();
-    participant.on("trackSubscribed", attach);
-    participant.on("trackUnsubscribed", attach);
-    participant.on("trackPublished", attach);
-    participant.on("trackUnpublished", attach);
+    sync();
+    participant.on("trackSubscribed", sync);
+    participant.on("trackUnsubscribed", sync);
+    participant.on("trackPublished", sync);
+    participant.on("trackUnpublished", sync);
+    participant.on("trackMuted", sync);
+    participant.on("trackUnmuted", sync);
     return () => {
-      detach();
-      participant.off("trackSubscribed", attach);
-      participant.off("trackUnsubscribed", attach);
-      participant.off("trackPublished", attach);
-      participant.off("trackUnpublished", attach);
+      participant.off("trackSubscribed", sync);
+      participant.off("trackUnsubscribed", sync);
+      participant.off("trackPublished", sync);
+      participant.off("trackUnpublished", sync);
+      participant.off("trackMuted", sync);
+      participant.off("trackUnmuted", sync);
+      for (const pub of participant.videoTrackPublications.values()) {
+        if (pub.track) pub.track.detach(video);
+      }
     };
   }, [participant]);
 
-  const hasCamera = Array.from(
-    participant.videoTrackPublications.values(),
-  ).some((pub) => pub.source === Track.Source.Camera && pub.track?.isMuted === false);
+  const displayName = participant.name || participant.identity;
+  const initial = displayName.slice(0, 1).toUpperCase();
 
   return (
-    <div
-      style={{
-        position: "relative",
-        background: "var(--bg-inset)",
-        border: `1px solid ${isSpeaking ? "var(--accent)" : "var(--border)"}`,
-        overflow: "hidden",
-        aspectRatio: "16 / 9",
-      }}
-    >
+    <div className={`tile${isSpeaking && micOn ? " tile-speaking" : ""}`}>
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          display: hasCamera ? "block" : "none",
-        }}
+        className="tile-video"
+        style={{ display: cameraOn ? "block" : "none" }}
       />
-      {!hasCamera && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <span className="display display-md" style={{ color: "var(--fg-tertiary)" }}>
-            {(participant.name || participant.identity).slice(0, 1).toUpperCase()}
-          </span>
+      {!cameraOn && (
+        <div className="tile-placeholder">
+          <span className="tile-placeholder-initial">{initial}</span>
         </div>
       )}
 
-      {/* Bottom-left: name + language badge */}
-      <div
-        style={{
-          position: "absolute",
-          left: 12,
-          bottom: 12,
-          background: "rgba(26, 25, 23, 0.78)",
-          color: "var(--bg)",
-          padding: "6px 10px",
-          fontSize: 12,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <span>{participant.name || participant.identity}</span>
+      {!micOn && (
+        <div className="tile-mic-off" title="Microphone off">
+          <MicOffIcon />
+        </div>
+      )}
+
+      <div className="tile-name">
+        <span className="tile-name-text">{displayName}</span>
         {langInfo && (
-          <span title={langInfo.name} style={{ opacity: 0.85 }}>
-            {langInfo.flag} {langInfo.code.toUpperCase()}
+          <span className="tile-badge" title={langInfo.name}>
+            <span aria-hidden>{langInfo.flag}</span>
+            {needsTranslation ? `→ ${myLang.toUpperCase()}` : langInfo.code.toUpperCase()}
           </span>
         )}
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { PICKER_LANGUAGES, getLanguageByCode } from "@/lib/languages";
+import { ChevronDownIcon } from "./icons";
 
 export default function LanguagePill({
   value,
@@ -12,31 +13,19 @@ export default function LanguagePill({
   const current = getLanguageByCode(value);
 
   return (
-    <label
-      style={{
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 12px",
-        border: "1px solid var(--border)",
-        background: "var(--bg-elevated)",
-        cursor: "pointer",
-        fontFamily: "var(--font-mono)",
-        fontSize: 13,
-      }}
-    >
-      <span aria-hidden>{current?.flag ?? "🌐"}</span>
-      <span>{current?.name ?? "Pick language"}</span>
+    <label className="lang-pill">
+      <span className="lang-pill-prefix">Lang</span>
+      <span className="lang-pill-flag" aria-hidden>
+        {current?.flag ?? "🌐"}
+      </span>
+      <span className="lang-pill-name">{current?.name ?? "Pick language"}</span>
+      <span className="lang-pill-chevron" aria-hidden>
+        <ChevronDownIcon />
+      </span>
       <select
+        className="lang-pill-select"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{
-          position: "absolute",
-          inset: 0,
-          opacity: 0,
-          cursor: "pointer",
-        }}
         aria-label="Listening language"
       >
         {PICKER_LANGUAGES.map((l) => (

@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useLocalParticipant,
   useRemoteParticipants,
   useRoomContext,
 } from "@livekit/components-react";
-import { ParticipantKind } from "livekit-client";
+import { ConnectionState, ParticipantKind, RoomEvent } from "livekit-client";
 import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+import { getLanguageByCode } from "@/lib/languages";
 import { useTranslationRouting } from "./useTranslationRouting";
 import VideoGrid from "./VideoGrid";
 import SelfView from "./SelfView";
 import ControlBar from "./ControlBar";
 import LanguagePill from "./LanguagePill";
+import CaptionsSidebar from "./CaptionsSidebar";
 
 export default function InCall({
   initialLang,
@@ -25,59 +27,119 @@ export default function InCall({
   const { localParticipant } = useLocalParticipant();
   const remotes = useRemoteParticipants();
   const [lang, setLang] = useState(initialLang);
+  const [captionsOpen, setCaptionsOpen] = useState(false);
 
-  // Push the initial language onto the local participant's attributes once
-  // we're connected so the agent and other peers can see it.
+  // Push the local lang into participant attributes so the agent + peers see
+  // it. setAttributes is silently dropped before the room is connected, so we
+  // both fire on `lang` change and re-fire when the connection becomes ready.
   useEffect(() => {
-    if (!localParticipant) return;
-    localParticipant.setAttributes({ [PARTICIPANT_LANG_ATTR]: lang });
-  }, [localParticipant, lang]);
+    if (!localParticipant || !room) return;
+    const apply = () => {
+      if (room.state === ConnectionState.Connected) {
+        localParticipant.setAttributes({ [PARTICIPANT_LANG_ATTR]: lang });
+      }
+    };
+    apply();
+    room.on(RoomEvent.Connected, apply);
+    return () => {
+      room.off(RoomEvent.Connected, apply);
+    };
+  }, [room, localParticipant, lang]);
 
-  // Subscribe/unsubscribe to the right audio tracks for the current language.
   useTranslationRouting(lang);
 
-  const humanRemotes = remotes.filter((p) => p.kind !== ParticipantKind.AGENT);
+  const humanRemotes = useMemo(
+    () => remotes.filter((p) => p.kind !== ParticipantKind.AGENT),
+    [remotes],
+  );
+  const peerLangs = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    for (const p of humanRemotes) {
+      map.set(p.identity, p.attributes?.[PARTICIPANT_LANG_ATTR]);
+    }
+    return map;
+  }, [humanRemotes]);
+
+  const langInfo = getLanguageByCode(lang);
   const inviteUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/session/${room.name}`
       : "";
 
   return (
-    <div
-      style={{
-        position: "relative",
-        height: "100vh",
-        width: "100vw",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--bg)",
-      }}
-    >
+    <div className="room">
       {/* Top chrome */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "16px 24px",
-          gap: 12,
-          flexShrink: 0,
-        }}
-      >
-        <div className="mono">
-          {humanRemotes.length + 1} {humanRemotes.length === 0 ? "person" : "people"}
+      <header className="room-chrome">
+        <div className="chrome-meta">
+          <span>{humanRemotes.length + 1} {humanRemotes.length === 0 ? "person" : "people"}</span>
+          <span className="divider">·</span>
+          <span>
+            Hearing in{" "}
+            <strong style={{ color: "var(--fg)", fontWeight: 500 }}>
+              {langInfo?.name ?? lang}
+            </strong>
+          </span>
         </div>
         <LanguagePill value={lang} onChange={setLang} />
-      </div>
+      </header>
 
-      {/* Main grid */}
-      <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-        <VideoGrid participants={humanRemotes} />
+      {/* Stage */}
+      <main className="room-stage">
+        {humanRemotes.length === 0 ? (
+          <EmptyStage inviteUrl={inviteUrl} />
+        ) : (
+          <VideoGrid participants={humanRemotes} myLang={lang} />
+        )}
         <SelfView />
-      </div>
+      </main>
 
-      {/* Bottom control bar */}
-      <ControlBar onLeave={onLeave} inviteUrl={inviteUrl} />
+      {/* Control bar */}
+      <ControlBar
+        onLeave={onLeave}
+        inviteUrl={inviteUrl}
+        captionsOpen={captionsOpen}
+        onToggleCaptions={() => setCaptionsOpen((v) => !v)}
+      />
+
+      {/* Captions */}
+      <CaptionsSidebar
+        open={captionsOpen}
+        onClose={() => setCaptionsOpen(false)}
+        myLang={lang}
+        peerLangs={peerLangs}
+      />
+    </div>
+  );
+}
+
+function EmptyStage({ inviteUrl }: { inviteUrl: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignored
+    }
+  }
+
+  return (
+    <div className="empty-stage enter">
+      <span className="empty-stage-eyebrow">You&apos;re alone in here</span>
+      <h2 className="display display-lg" style={{ marginBottom: 12 }}>
+        Waiting for others
+      </h2>
+      <p className="body">
+        Share the link below. Translation spins up automatically when someone
+        joins with a different language.
+      </p>
+      <div className="invite-card">
+        <div className="invite-card-url">{inviteUrl}</div>
+        <button className="invite-card-btn" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
     </div>
   );
 }

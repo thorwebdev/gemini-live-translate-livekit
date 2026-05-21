@@ -6,13 +6,26 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
+import {
+  CamOffIcon,
+  CamOnIcon,
+  CaptionsIcon,
+  LeaveIcon,
+  LinkIcon,
+  MicOffIcon,
+  MicOnIcon,
+} from "./icons";
 
 export default function ControlBar({
   onLeave,
   inviteUrl,
+  captionsOpen,
+  onToggleCaptions,
 }: {
   onLeave: () => void;
   inviteUrl: string;
+  captionsOpen: boolean;
+  onToggleCaptions: () => void;
 }) {
   const { localParticipant, microphoneTrack, cameraTrack } = useLocalParticipant();
   const room = useRoomContext();
@@ -20,7 +33,9 @@ export default function ControlBar({
 
   const micOn = !!microphoneTrack && !microphoneTrack.isMuted;
   const camOn =
-    !!cameraTrack && cameraTrack.source === Track.Source.Camera && !cameraTrack.isMuted;
+    !!cameraTrack &&
+    cameraTrack.source === Track.Source.Camera &&
+    !cameraTrack.isMuted;
 
   async function toggleMic() {
     await localParticipant.setMicrophoneEnabled(!micOn);
@@ -43,48 +58,47 @@ export default function ControlBar({
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        gap: 8,
-        padding: "16px 24px",
-        background: "var(--bg-elevated)",
-        borderTop: "1px solid var(--border)",
-        flexShrink: 0,
-      }}
-    >
-      <ControlButton
+    <div className="control-bar">
+      <CtrlButton
         active={micOn}
         onClick={toggleMic}
-        label={micOn ? "Mute" : "Unmute"}
-        icon={micOn ? "🎙️" : "🔇"}
+        label={micOn ? "Mic on" : "Mic off"}
+        icon={micOn ? <MicOnIcon /> : <MicOffIcon />}
       />
-      <ControlButton
+      <CtrlButton
         active={camOn}
         onClick={toggleCam}
-        label={camOn ? "Stop video" : "Start video"}
-        icon={camOn ? "📹" : "🎥"}
+        label={camOn ? "Camera on" : "Camera off"}
+        icon={camOn ? <CamOnIcon /> : <CamOffIcon />}
       />
-      <ControlButton
+      <CtrlButton
+        active={captionsOpen}
+        onClick={onToggleCaptions}
+        label="Captions"
+        icon={<CaptionsIcon />}
+      />
+      <CtrlButton
         active={false}
         onClick={copyInvite}
-        label={copied ? "Copied!" : "Invite"}
-        icon="🔗"
+        label={copied ? "Copied" : "Invite"}
+        icon={<LinkIcon />}
       />
       <button
-        className="btn btn-danger"
+        className="ctrl ctrl--warning ctrl-leave"
         onClick={leave}
-        style={{ marginLeft: 16 }}
+        title="Leave the call"
+        aria-label="Leave"
       >
-        Leave
+        <span className="ctrl-icon">
+          <LeaveIcon />
+        </span>
+        <span>Leave</span>
       </button>
     </div>
   );
 }
 
-function ControlButton({
+function CtrlButton({
   active,
   onClick,
   label,
@@ -93,29 +107,16 @@ function ControlButton({
   active: boolean;
   onClick: () => void;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
 }) {
   return (
     <button
+      className={`ctrl${active ? " ctrl--active" : ""}`}
       onClick={onClick}
       title={label}
       aria-label={label}
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 2,
-        padding: "8px 16px",
-        background: active ? "var(--fg)" : "transparent",
-        color: active ? "var(--bg)" : "var(--fg)",
-        border: `1px solid ${active ? "var(--fg)" : "var(--border)"}`,
-        cursor: "pointer",
-        fontSize: 11,
-        fontFamily: "var(--font-mono)",
-        minWidth: 72,
-      }}
     >
-      <span style={{ fontSize: 18 }}>{icon}</span>
+      <span className="ctrl-icon">{icon}</span>
       <span>{label}</span>
     </button>
   );

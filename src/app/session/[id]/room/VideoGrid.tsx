@@ -1,57 +1,42 @@
 "use client";
 
+import { useMemo } from "react";
 import type { RemoteParticipant } from "livekit-client";
 import ParticipantTile from "./ParticipantTile";
 
 export default function VideoGrid({
   participants,
+  myLang,
 }: {
   participants: RemoteParticipant[];
+  myLang: string;
 }) {
-  if (participants.length === 0) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <p className="display display-md" style={{ marginBottom: 8 }}>
-            Waiting for others
-          </p>
-          <p className="body">
-            Share the invite link from the control bar below.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const layout = useMemo(() => deriveLayout(participants.length), [participants.length]);
 
   return (
     <div
+      className="tile-grid"
       style={{
-        height: "100%",
-        padding: "16px 24px",
-        display: "grid",
-        gridTemplateColumns: gridColumns(participants.length),
-        gap: 16,
-        alignContent: "stretch",
+        gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
+        maxWidth: layout.maxWidth,
       }}
     >
       {participants.map((p) => (
-        <ParticipantTile key={p.identity} participant={p} />
+        <ParticipantTile key={p.identity} participant={p} myLang={myLang} />
       ))}
     </div>
   );
 }
 
-function gridColumns(n: number): string {
-  // 1 -> full-bleed; 2 -> two columns; 3-4 -> 2x2; 5-9 -> 3x3; 10+ -> 4 cols
-  if (n <= 1) return "1fr";
-  if (n <= 4) return "1fr 1fr";
-  if (n <= 9) return "1fr 1fr 1fr";
-  return "1fr 1fr 1fr 1fr";
+/**
+ * Pick column count + max grid width based on participant count.
+ * Keeps tiles a sensible size — never the whole viewport on a 1:1 call.
+ */
+function deriveLayout(n: number): { cols: number; maxWidth: string } {
+  if (n <= 1) return { cols: 1, maxWidth: "min(900px, 80vw)" };
+  if (n <= 2) return { cols: 2, maxWidth: "min(1400px, 92vw)" };
+  if (n <= 4) return { cols: 2, maxWidth: "min(1200px, 92vw)" };
+  if (n <= 6) return { cols: 3, maxWidth: "min(1400px, 96vw)" };
+  if (n <= 9) return { cols: 3, maxWidth: "min(1600px, 96vw)" };
+  return { cols: 4, maxWidth: "min(1700px, 96vw)" };
 }
