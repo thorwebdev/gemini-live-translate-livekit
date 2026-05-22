@@ -1,14 +1,24 @@
-"""One bidirectional Gemini Live session bridging a speaker to a target language."""
+"""One bidirectional Gemini Live session bridging a speaker to a target language.
+
+We talk to Gemini Live via a raw WebSocket against the v1beta BidiGenerateContent
+endpoint rather than via google-genai's `client.aio.live.connect()`. Reason:
+the SDK serializes the streaming-translation config under the wrong wire name
+(`streamTranslationConfig`, without `-ing`) and ignores Pydantic alias overrides.
+The v1beta API actually expects `streamingTranslationConfig` (with `-ing`) nested
+under `generationConfig`, as the previous Node implementation used successfully.
+Bypassing the SDK lets us control the exact JSON shape.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import json
 import logging
 import random
 
-from google import genai
-from google.genai import types as genai_types
+import websockets
 from livekit import rtc
 
 from audio import iter_pcm_for_gemini, make_audio_source, push_pcm_to_source
@@ -22,16 +32,21 @@ from config import (
 logger = logging.getLogger("translator.session")
 
 
+GEMINI_WS_URL = (
+    "wss://generativelanguage.googleapis.com/ws/"
+    "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+)
+
+
 class GeminiSession:
     """Bridges a single speaker's mic into a single target-language translation track.
 
     Lifecycle:
-      - `start()` connects to Gemini Live, publishes a translator track to the room,
-        and starts the in/out audio pumps.
+      - `start()` publishes the translator track and starts the WS-pump loop.
       - `aclose()` tears everything down. Idempotent.
-      - On Gemini errors, the session reconnects with exponential backoff. After
-        `GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF` consecutive failures it logs at
-        ERROR level and keeps retrying with the longest backoff in the schedule.
+      - On WebSocket errors, reconnects with exponential backoff. After
+        `GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF` consecutive failures it logs
+        at ERROR level and keeps retrying with the longest backoff.
     """
 
     def __init__(
@@ -49,7 +64,6 @@ class GeminiSession:
         self._target_lang = target_lang
         self._gemini_api_key = gemini_api_key
 
-        self._client = genai.Client(api_key=gemini_api_key)
         self._audio_source = make_audio_source()
         self._local_track: rtc.LocalAudioTrack | None = None
         self._track_sid: str | None = None
@@ -164,23 +178,25 @@ class GeminiSession:
                     pass
 
     async def _connect_and_pump(self) -> None:
-        """One Gemini connect + bidirectional pump."""
-        live_config = self._build_live_config()
-        async with self._client.aio.live.connect(
-            model=GEMINI_MODEL, config=live_config
-        ) as session:
+        """One Gemini WebSocket connect + bidirectional pump."""
+        url = f"{GEMINI_WS_URL}?key={self._gemini_api_key}"
+        # Max payload size: enough to cover ~1s of 48 kHz 16-bit PCM in base64.
+        async with websockets.connect(
+            url, max_size=2**22, ping_interval=20, ping_timeout=20
+        ) as ws:
+            await ws.send(json.dumps(self._build_setup_payload()))
             logger.info(
-                "Gemini connected: %s -> %s",
+                "Gemini WS connected: %s -> %s, awaiting setupComplete",
                 self._speaker_identity,
                 self._target_lang,
             )
-            self._consecutive_failures = 0
 
+            setup_complete = asyncio.Event()
             send_task = asyncio.create_task(
-                self._pump_input(session), name="gemini-input"
+                self._pump_input(ws, setup_complete), name="gemini-input"
             )
             recv_task = asyncio.create_task(
-                self._pump_output(session), name="gemini-output"
+                self._pump_output(ws, setup_complete), name="gemini-output"
             )
 
             done, pending = await asyncio.wait(
@@ -194,60 +210,124 @@ class GeminiSession:
                 if exc is not None:
                     raise exc
 
-    def _build_live_config(self) -> genai_types.LiveConnectConfig:
-        """Build the Gemini Live setup with streaming translation enabled."""
-        # The streaming translation config and output transcription are accepted
-        # by the v1beta Live API as fields on the setup payload. The Python SDK's
-        # LiveConnectConfig may expose them as native fields in future versions;
-        # for now we pass via the dict-style config to mirror the bidi WS schema.
-        return {  # type: ignore[return-value]
-            "response_modalities": ["AUDIO"],
-            "output_audio_transcription": {},
-            "streaming_translation_config": {
-                "target_language_code": self._target_lang,
-                "echo_target_language": False,
-            },
-            "realtime_input_config": {
-                "automatic_activity_detection": {"disabled": False},
-            },
+    def _build_setup_payload(self) -> dict:
+        """The first WS message — must match the v1beta BidiGenerateContent setup
+        schema. Field names use the exact camelCase the API expects (verified
+        against the previous Node implementation that worked in production)."""
+        return {
+            "setup": {
+                "model": f"models/{GEMINI_MODEL}",
+                "outputAudioTranscription": {},
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "streamingTranslationConfig": {
+                        "targetLanguageCode": self._target_lang,
+                        "echoTargetLanguage": False,
+                    },
+                },
+                "realtimeInputConfig": {
+                    "automaticActivityDetection": {"disabled": False},
+                },
+            }
         }
 
-    async def _pump_input(self, session) -> None:
-        """Read PCM from the speaker's track and forward to Gemini."""
+    async def _pump_input(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        setup_complete: asyncio.Event,
+    ) -> None:
+        """Read PCM from the speaker's track and forward to Gemini as base64."""
+        # Don't start streaming audio until Gemini acknowledges setup; otherwise
+        # the model has nothing telling it what to do with the bytes.
+        await setup_complete.wait()
+        sent = 0
+        mime = f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}"
         async for pcm in iter_pcm_for_gemini(self._speaker_track):
             if self._closed.is_set():
                 return
-            await session.send_realtime_input(
-                audio=genai_types.Blob(
-                    data=pcm,
-                    mime_type=f"audio/pcm;rate={GEMINI_INPUT_SAMPLE_RATE}",
+            b64 = base64.b64encode(pcm).decode("ascii")
+            msg = {
+                "realtimeInput": {
+                    "audio": {
+                        "mimeType": mime,
+                        "data": b64,
+                    }
+                }
+            }
+            await ws.send(json.dumps(msg))
+            sent += 1
+            if sent in (1, 50) or sent % 500 == 0:
+                logger.info(
+                    "gemini <- %s frames=%d (%s mic in)",
+                    self._target_lang,
+                    sent,
+                    self._speaker_identity,
                 )
-            )
 
-    async def _pump_output(self, session) -> None:
+    async def _pump_output(
+        self,
+        ws: websockets.WebSocketClientProtocol,
+        setup_complete: asyncio.Event,
+    ) -> None:
         """Receive Gemini translated audio + transcription, route into the room."""
-        async for response in session.receive():
+        audio_frames = 0
+        text_chunks = 0
+        async for raw in ws:
             if self._closed.is_set():
                 return
-
-            sc = getattr(response, "server_content", None)
-            if sc is None:
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.debug("ignoring non-JSON WS frame")
                 continue
 
-            # Translated audio frames
-            model_turn = getattr(sc, "model_turn", None)
+            if msg.get("setupComplete") is not None:
+                logger.info(
+                    "Gemini setup complete: %s -> %s",
+                    self._speaker_identity,
+                    self._target_lang,
+                )
+                self._consecutive_failures = 0
+                setup_complete.set()
+                continue
+
+            sc = msg.get("serverContent")
+            if not sc:
+                continue
+
+            # Translated audio frames.
+            model_turn = sc.get("modelTurn")
             if model_turn is not None:
-                for part in getattr(model_turn, "parts", []) or []:
-                    inline = getattr(part, "inline_data", None)
-                    if inline and inline.data:
-                        await push_pcm_to_source(self._audio_source, inline.data)
+                for part in model_turn.get("parts", []) or []:
+                    inline = part.get("inlineData")
+                    if inline and inline.get("data"):
+                        pcm = base64.b64decode(inline["data"])
+                        await push_pcm_to_source(self._audio_source, pcm)
+                        audio_frames += 1
+                        if audio_frames in (1, 10, 100) or audio_frames % 500 == 0:
+                            logger.info(
+                                "gemini -> %s frames=%d (%s -> %s)",
+                                self._target_lang,
+                                audio_frames,
+                                self._speaker_identity,
+                                self._target_lang,
+                            )
 
-            # Translated transcript -> text stream for the captions sidebar
-            ot = getattr(sc, "output_transcription", None)
-            if ot and getattr(ot, "text", None):
-                await self._publish_transcript(ot.text, final=False)
+            # Translated transcript -> text stream for the captions sidebar.
+            ot = sc.get("outputTranscription")
+            if ot and ot.get("text"):
+                await self._publish_transcript(ot["text"], final=False)
+                text_chunks += 1
+                if text_chunks in (1, 10) or text_chunks % 50 == 0:
+                    logger.info(
+                        "gemini transcript chunk #%d for %s -> %s: %r",
+                        text_chunks,
+                        self._speaker_identity,
+                        self._target_lang,
+                        ot["text"][:60],
+                    )
 
-            if getattr(sc, "turn_complete", False):
+            if sc.get("turnComplete"):
                 await self._publish_transcript("", final=True)
 
     async def _publish_transcript(self, text: str, *, final: bool) -> None:

@@ -11,7 +11,10 @@ const SESSION_TTL_SECONDS = 4 * 60 * 60; // 4h hard cap per grill Q21
 const EMPTY_ROOM_TIMEOUT = 60; // close empty rooms after 60s
 const DEPARTURE_TIMEOUT = 30; // close after last person leaves
 const MAX_PARTICIPANTS = 8; // room cap per grill Q21
-const TRANSLATOR_AGENT_NAME = "translator";
+// Must match agent_name in translator/src/agent.py. Using "gemini-translator"
+// instead of the generic "translator" to avoid colliding with stale Cloud
+// Agents that may already be registered under "translator".
+const TRANSLATOR_AGENT_NAME = "gemini-translator";
 
 export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get("room");

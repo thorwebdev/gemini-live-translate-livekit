@@ -23,7 +23,10 @@ load_dotenv(".env.local")
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="translator")
+# Dispatch name. Must match TRANSLATOR_AGENT_NAME in src/app/api/token/route.ts.
+# We use a unique name (not "translator") so we don't collide with stale Cloud
+# Agents registered under common names — see git history for the diagnosis.
+@server.rtc_session(agent_name="gemini-translator")
 async def translator_entrypoint(ctx: JobContext) -> None:
     """One worker process per room. Subscribes to all human mic tracks and
     publishes translator tracks based on per-participant `lang` attributes."""
