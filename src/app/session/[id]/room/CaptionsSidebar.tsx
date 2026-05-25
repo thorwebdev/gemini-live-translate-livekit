@@ -33,14 +33,15 @@ export default function CaptionsSidebar({
     return map;
   }, [remotes]);
 
-  // Each TextStream is one append from the agent. Group consecutive ones by
-  // source_identity into a single visual block, but rebuild on every render —
-  // the source list is small.
+  // Each TextStream is one append from the agent. Group chunks into one entry
+  // per *utterance*: append chunks from the same speaker into the entry that's
+  // currently "open" for that speaker, and seal it when the agent sends a
+  // `final="true"` boundary marker (one is emitted on every Gemini
+  // `turnComplete`). The next non-final chunk from the same speaker then
+  // starts a fresh entry — one utterance per line.
   const entries = useMemo(() => {
     const matching = textStreams
-      .filter(
-        (s) => s.streamInfo.attributes?.target_lang === myLang && !!s.text.trim(),
-      )
+      .filter((s) => s.streamInfo.attributes?.target_lang === myLang)
       .sort((a, b) => a.streamInfo.timestamp - b.streamInfo.timestamp);
 
     type Entry = {
@@ -50,19 +51,47 @@ export default function CaptionsSidebar({
       sourceLang: string | undefined;
     };
     const out: Entry[] = [];
+    const openIdxBySource = new Map<string, number>();
+
     for (const s of matching) {
-      const source = s.streamInfo.attributes?.source_identity ?? s.participantInfo.identity;
-      const sourceLang = peerLangs.get(source);
-      const last = out[out.length - 1];
-      if (last && last.sourceIdentity === source) {
-        last.text += " " + s.text.trim();
+      const source =
+        s.streamInfo.attributes?.source_identity ?? s.participantInfo.identity;
+      const isFinal = s.streamInfo.attributes?.final === "true";
+      const text = s.text.trim();
+
+      // Final markers carry empty text from the agent, but defensively flush
+      // any text into the open entry before sealing the utterance.
+      if (isFinal) {
+        if (text) {
+          const idx = openIdxBySource.get(source);
+          if (idx !== undefined) {
+            out[idx].text = `${out[idx].text} ${text}`.trim();
+          } else {
+            out.push({
+              key: s.streamInfo.id,
+              sourceIdentity: source,
+              text,
+              sourceLang: peerLangs.get(source),
+            });
+          }
+        }
+        openIdxBySource.delete(source);
+        continue;
+      }
+
+      if (!text) continue;
+
+      const openIdx = openIdxBySource.get(source);
+      if (openIdx !== undefined) {
+        out[openIdx].text = `${out[openIdx].text} ${text}`.trim();
       } else {
         out.push({
           key: s.streamInfo.id,
           sourceIdentity: source,
-          text: s.text.trim(),
-          sourceLang,
+          text,
+          sourceLang: peerLangs.get(source),
         });
+        openIdxBySource.set(source, out.length - 1);
       }
     }
     return out;
