@@ -447,13 +447,12 @@ body {
   position: relative;
   height: 100vh;
   width: 100vw;
-  display: grid;
-  /* The second column animates 0 -> captions width when the user toggles the
-     captions sidebar. Transitioning grid-template-columns is well-supported
-     in modern browsers and produces a smooth "push" — the room column
-     reflows to whatever's left, rather than being covered by an overlay. */
-  grid-template-columns: 1fr 0fr;
-  transition: grid-template-columns 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  /* Flex row so the sidebar can animate as a pure width transition on a flex
+     child — the room flex:1 column reflows continuously. Grid-template-columns
+     with a 0fr -> length transition technically works but interpolates in
+     stepped chunks, which feels jarring. */
+  display: flex;
+  flex-direction: row;
   overflow: hidden;
   background:
     radial-gradient(
@@ -464,15 +463,12 @@ body {
     var(--bg);
 }
 
-.room-shell--captions-open {
-  grid-template-columns: 1fr min(380px, 92vw);
-}
-
 .room {
   position: relative;
+  flex: 1;
+  min-width: 0; /* let the flex item shrink below content's intrinsic width */
   display: grid;
   grid-template-rows: auto 1fr auto;
-  min-width: 0; /* let grid item shrink below content's intrinsic width */
   height: 100%;
 }
 
@@ -875,16 +871,24 @@ body {
 
 .captions {
   position: relative;
+  flex-shrink: 0;
+  width: 0;
   overflow: hidden;
   background: var(--bg);
   border-left: 1px solid transparent;
-  transition: border-color 0.32s ease;
+  /* Smooth, slightly longer easing avoids the snap. Material standard
+     curve for entering/exiting elements. */
+  transition:
+    width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.4s ease;
   display: flex;
   flex-direction: column;
   height: 100%;
+  will-change: width;
 }
 
 .room-shell--captions-open .captions {
+  width: min(380px, 92vw);
   border-left-color: var(--border);
 }
 
