@@ -106,42 +106,49 @@ export default function CaptionsSidebar({
   const myLangInfo = getLanguageByCode(myLang);
 
   return (
-    <aside className={`captions${open ? " open" : ""}`} aria-hidden={!open}>
-      <div className="captions-header">
-        <span>
-          Captions {myLangInfo && `· ${myLangInfo.flag} ${myLangInfo.name}`}
-        </span>
-        <button
-          className="captions-close"
-          onClick={onClose}
-          aria-label="Close captions"
-        >
-          Close
-        </button>
-      </div>
-      <div ref={bodyRef} className="captions-body">
-        {entries.length === 0 ? (
-          <div className="captions-empty">
-            No captions yet. Translation transcripts will appear here as people
-            speak.
-          </div>
-        ) : (
-          entries.map((entry) => (
-            <div className="captions-entry" key={entry.key}>
-              <div className="captions-speaker">
-                <span className="captions-speaker-name">
-                  {names.get(entry.sourceIdentity) ?? entry.sourceIdentity}
-                </span>
-                {entry.sourceLang && (
-                  <span className="captions-speaker-lang">
-                    {entry.sourceLang} → {myLang}
-                  </span>
-                )}
-              </div>
-              <p className="captions-text">{entry.text}</p>
+    <aside
+      className={`captions${open ? " open" : ""}`}
+      aria-hidden={!open}
+    >
+      {/* Inner has a fixed width so the outer can animate its width 0 -> 380px
+          without the content reflowing / squishing along the way. */}
+      <div className="captions-inner">
+        <div className="captions-header">
+          <span>
+            Captions {myLangInfo && `· ${myLangInfo.flag} ${myLangInfo.name}`}
+          </span>
+          <button
+            className="captions-close"
+            onClick={onClose}
+            aria-label="Close captions"
+          >
+            Close
+          </button>
+        </div>
+        <div ref={bodyRef} className="captions-body">
+          {entries.length === 0 ? (
+            <div className="captions-empty">
+              No captions yet. Translation transcripts will appear here as
+              people speak.
             </div>
-          ))
-        )}
+          ) : (
+            entries.map((entry) => (
+              <div className="captions-entry" key={entry.key}>
+                <div className="captions-speaker">
+                  <span className="captions-speaker-name">
+                    {names.get(entry.sourceIdentity) ?? entry.sourceIdentity}
+                  </span>
+                  {entry.sourceLang && (
+                    <span className="captions-speaker-lang">
+                      {entry.sourceLang} → {myLang}
+                    </span>
+                  )}
+                </div>
+                <p className="captions-text">{entry.text}</p>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </aside>
   );

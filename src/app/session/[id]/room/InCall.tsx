@@ -67,41 +67,48 @@ export default function InCall({
       : "";
 
   return (
-    <div className="room">
-      {/* Top chrome */}
-      <header className="room-chrome">
-        <div className="chrome-meta">
-          <span>{humanRemotes.length + 1} {humanRemotes.length === 0 ? "person" : "people"}</span>
-          <span className="divider">·</span>
-          <span>
-            Hearing in{" "}
-            <strong style={{ color: "var(--fg)", fontWeight: 500 }}>
-              {langInfo?.name ?? lang}
-            </strong>
-          </span>
-        </div>
-        <LanguagePill value={lang} onChange={setLang} />
-      </header>
+    <div
+      className={`room-shell${captionsOpen ? " room-shell--captions-open" : ""}`}
+    >
+      <div className="room">
+        {/* Top chrome */}
+        <header className="room-chrome">
+          <div className="chrome-meta">
+            <span>
+              {humanRemotes.length + 1}{" "}
+              {humanRemotes.length === 0 ? "person" : "people"}
+            </span>
+            <span className="divider">·</span>
+            <span>
+              Hearing in{" "}
+              <strong style={{ color: "var(--fg)", fontWeight: 500 }}>
+                {langInfo?.name ?? lang}
+              </strong>
+            </span>
+          </div>
+          <LanguagePill value={lang} onChange={setLang} />
+        </header>
 
-      {/* Stage */}
-      <main className="room-stage">
-        {humanRemotes.length === 0 ? (
-          <EmptyStage inviteUrl={inviteUrl} />
-        ) : (
-          <VideoGrid participants={humanRemotes} myLang={lang} />
-        )}
-        <SelfView />
-      </main>
+        {/* Stage */}
+        <main className="room-stage">
+          {humanRemotes.length === 0 ? (
+            <EmptyStage inviteUrl={inviteUrl} />
+          ) : (
+            <VideoGrid participants={humanRemotes} myLang={lang} />
+          )}
+          <SelfView />
+        </main>
 
-      {/* Control bar */}
-      <ControlBar
-        onLeave={onLeave}
-        inviteUrl={inviteUrl}
-        captionsOpen={captionsOpen}
-        onToggleCaptions={() => setCaptionsOpen((v) => !v)}
-      />
+        {/* Control bar */}
+        <ControlBar
+          onLeave={onLeave}
+          inviteUrl={inviteUrl}
+          captionsOpen={captionsOpen}
+          onToggleCaptions={() => setCaptionsOpen((v) => !v)}
+        />
+      </div>
 
-      {/* Captions */}
+      {/* Captions — sibling column of .room so the room is pushed, not covered */}
       <CaptionsSidebar
         open={captionsOpen}
         onClose={() => setCaptionsOpen(false)}

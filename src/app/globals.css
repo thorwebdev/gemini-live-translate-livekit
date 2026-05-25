@@ -443,12 +443,18 @@ body {
    Room — layout + chrome
    —————————————————————————————————————— */
 
-.room {
+.room-shell {
   position: relative;
   height: 100vh;
   width: 100vw;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* The second column animates 0 -> captions width when the user toggles the
+     captions sidebar. Transitioning grid-template-columns is well-supported
+     in modern browsers and produces a smooth "push" — the room column
+     reflows to whatever's left, rather than being covered by an overlay. */
+  grid-template-columns: 1fr 0fr;
+  transition: grid-template-columns 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  overflow: hidden;
   background:
     radial-gradient(
       1200px 600px at 50% -20%,
@@ -456,6 +462,18 @@ body {
       transparent 70%
     ),
     var(--bg);
+}
+
+.room-shell--captions-open {
+  grid-template-columns: 1fr min(380px, 92vw);
+}
+
+.room {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-width: 0; /* let grid item shrink below content's intrinsic width */
+  height: 100%;
 }
 
 .room-chrome {
@@ -852,27 +870,29 @@ body {
 }
 
 /* ——————————————————————————————————————
-   Captions sidebar
+   Captions sidebar — pushes the room column, doesn't overlay it
    —————————————————————————————————————— */
 
 .captions {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(380px, 92vw);
+  position: relative;
+  overflow: hidden;
   background: var(--bg);
-  border-left: 1px solid var(--border);
-  box-shadow: -16px 0 40px rgba(26, 25, 23, 0.06);
-  transform: translateX(100%);
-  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  border-left: 1px solid transparent;
+  transition: border-color 0.32s ease;
   display: flex;
   flex-direction: column;
-  z-index: 10;
+  height: 100%;
 }
 
-.captions.open {
-  transform: translateX(0);
+.room-shell--captions-open .captions {
+  border-left-color: var(--border);
+}
+
+.captions-inner {
+  width: min(380px, 92vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .captions-header {
