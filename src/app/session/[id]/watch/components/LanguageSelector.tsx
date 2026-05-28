@@ -41,7 +41,7 @@ export default function LanguageSelector({
             headers: { "Content-Type": "application/json" },
             body: payload,
             keepalive: true,
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
     };
@@ -63,7 +63,7 @@ export default function LanguageSelector({
               sessionId,
               targetLanguage: previousLanguage,
             }),
-          }).catch(() => {});
+          }).catch(() => { });
         }
         onLanguageChange("original", null);
         return;
@@ -120,7 +120,7 @@ export default function LanguageSelector({
           <optgroup label="Translations">
             {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
-                {lang.flag}  {lang.name}
+                {lang.name} {lang.flag}
               </option>
             ))}
           </optgroup>
