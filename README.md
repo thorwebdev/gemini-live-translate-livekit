@@ -83,7 +83,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Deploy to Cloud Run
 
-> **Note:** This app cannot be deployed to Vercel. The translation bridges are long-running processes (WebSocket connections to Gemini and LiveKit) that exceed Vercel's serverless function timeout limits. Cloud Run supports long-running requests and persistent containers.
+We recommend deploying to Google Cloud Run since the translation bridges are long-running processes (WebSocket connections to Gemini and LiveKit) that require persistent containers and support for long-running requests.
 
 ### Prerequisites
 

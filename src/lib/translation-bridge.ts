@@ -552,7 +552,11 @@ export class TranslationBridge {
       `[TranslationBridge:${this.targetLanguage}] Subscribed to organizer audio track, piping to Gemini`
     );
 
-    const audioStream = new AudioStream(track, this.inputSampleRate, this.channels);
+    const audioStream = new AudioStream(track, {
+      sampleRate: this.inputSampleRate,
+      numChannels: this.channels,
+      frameSizeMs: 100,
+    });
 
     // Process frames as they arrive via ReadableStream reader
     const reader = audioStream.getReader();
