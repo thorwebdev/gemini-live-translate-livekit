@@ -36,6 +36,8 @@ export class TranslationBridge {
   private transcriptionSegmentId: number = 0;
   private framesSentToGemini: number = 0;
   private framesReceivedFromGemini: number = 0;
+  private resumptionHandle: string | null = null;
+  private isReconnecting: boolean = false;
 
   public readonly targetLanguage: string;
   public readonly sessionId: string;
@@ -292,62 +294,109 @@ export class TranslationBridge {
    * Reuses the existing LiveKit room + audio pipeline.
    */
   private async reconnectGemini(): Promise<void> {
+    if (this.isReconnecting) {
+      console.log(
+        `[TranslationBridge:${this.targetLanguage}] Reconnection already in progress. Skipping duplicate request.`
+      );
+      return;
+    }
+    this.isReconnecting = true;
+
     try {
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.geminiApiKey}`;
+      console.log(
+        `[TranslationBridge:${this.targetLanguage}] Reconnecting Gemini WebSocket with handle: ${this.resumptionHandle || "none"}...`
+      );
 
-      this.geminiWs = new WebSocket(wsUrl);
+      const nextWs = new WebSocket(wsUrl);
+      let nextSetupComplete = false;
 
-      this.geminiWs.on("open", () => {
+      nextWs.on("open", () => {
         console.log(
-          `[TranslationBridge:${this.targetLanguage}] Gemini WebSocket reconnected`
+          `[TranslationBridge:${this.targetLanguage}] Gemini reconnect WebSocket opened`
         );
-        this.sendGeminiSetup();
+        this.sendGeminiSetup(nextWs);
       });
 
-      this.geminiWs.on("message", (data: WebSocket.Data) => {
-        if (!this.geminiSetupComplete) {
-          const msg = JSON.parse(data.toString());
-          if (msg.setupComplete) {
-            console.log(
-              `[TranslationBridge:${this.targetLanguage}] Gemini reconnect setup complete`
-            );
-            this.geminiSetupComplete = true;
-            return;
+      nextWs.on("message", (data: WebSocket.Data) => {
+        try {
+          if (!nextSetupComplete) {
+            const msg = JSON.parse(data.toString());
+            if (msg.setupComplete) {
+              console.log(
+                `[TranslationBridge:${this.targetLanguage}] Gemini reconnect setup complete`
+              );
+              nextSetupComplete = true;
+              this.geminiSetupComplete = true;
+
+              const oldWs = this.geminiWs;
+              this.geminiWs = nextWs;
+              this.isReconnecting = false;
+
+              if (oldWs) {
+                console.log(
+                  `[TranslationBridge:${this.targetLanguage}] Gracefully closing old Gemini WebSocket`
+                );
+                oldWs.removeAllListeners();
+                oldWs.close();
+              }
+              return;
+            }
           }
+          this.handleGeminiMessage(data);
+        } catch (error) {
+          console.error(
+            `[TranslationBridge:${this.targetLanguage}] Error handling reconnect message:`,
+            error
+          );
         }
-        this.handleGeminiMessage(data);
       });
 
-      this.geminiWs.on("error", (error) => {
+      nextWs.on("error", (error) => {
         console.error(
           `[TranslationBridge:${this.targetLanguage}] Gemini reconnect error:`,
           error
         );
       });
 
-      this.geminiWs.on("close", (code: number, reason: Buffer) => {
+      nextWs.on("close", (code: number, reason: Buffer) => {
         const reasonStr = reason.toString();
         console.log(
-          `[TranslationBridge:${this.targetLanguage}] Gemini reconnected WS closed`,
+          `[TranslationBridge:${this.targetLanguage}] Gemini reconnect WebSocket closed`,
           { code, reason: reasonStr }
         );
-        if (this.status === "active") {
-          setTimeout(() => {
-            this.geminiSetupComplete = false;
-            this.reconnectGemini();
-          }, 1000);
+
+        if (this.geminiWs === nextWs) {
+          this.geminiSetupComplete = false;
+          if (this.status === "active") {
+            setTimeout(() => {
+              this.reconnectGemini();
+            }, 1000);
+          }
+        } else {
+          this.isReconnecting = false;
+          if (this.status === "active") {
+            setTimeout(() => {
+              this.reconnectGemini();
+            }, 2000);
+          }
         }
       });
     } catch (error) {
       console.error(
-        `[TranslationBridge:${this.targetLanguage}] Gemini reconnect failed:`,
+        `[TranslationBridge:${this.targetLanguage}] Gemini reconnect initialization failed:`,
         error
       );
-      this.status = "error";
+      this.isReconnecting = false;
+      if (this.status === "active") {
+        setTimeout(() => {
+          this.reconnectGemini();
+        }, 5000);
+      }
     }
   }
 
-  private sendGeminiSetup(): void {
+  private sendGeminiSetup(ws: WebSocket = this.geminiWs!): void {
     const setupMessage = {
       setup: {
         model: `models/${this.geminiModel}`,
@@ -364,15 +413,18 @@ export class TranslationBridge {
             disabled: false,
           },
         },
+        sessionResumption: this.resumptionHandle
+          ? { handle: this.resumptionHandle }
+          : {},
       },
     };
 
     console.log(
-      `[TranslationBridge:${this.targetLanguage}] Sending Gemini setup:`,
+      `[TranslationBridge:${this.targetLanguage}] Sending Gemini setup (resuming: ${!!this.resumptionHandle}):`,
       JSON.stringify(setupMessage, null, 2)
     );
 
-    this.geminiWs!.send(JSON.stringify(setupMessage));
+    ws.send(JSON.stringify(setupMessage));
   }
 
   private handleGeminiMessage(data: WebSocket.Data): void {
@@ -394,6 +446,30 @@ export class TranslationBridge {
         );
         this.geminiSetupComplete = true;
         return;
+      }
+
+      // Handle session resumption update
+      if (message.sessionResumptionUpdate) {
+        const update = message.sessionResumptionUpdate;
+        if (update.resumable && update.newHandle) {
+          this.resumptionHandle = update.newHandle;
+          console.log(
+            `[TranslationBridge:${this.targetLanguage}] Received sessionResumptionUpdate with newHandle: ${this.resumptionHandle}`
+          );
+        }
+      }
+
+      // Handle GoAway message
+      if (message.goAway) {
+        console.log(
+          `[TranslationBridge:${this.targetLanguage}] Received goAway message from Gemini. Time left: ${message.goAway.timeLeft || "unknown"}. Initiating graceful session resumption...`
+        );
+        this.reconnectGemini().catch((err) => {
+          console.error(
+            `[TranslationBridge:${this.targetLanguage}] Error during goAway reconnection:`,
+            err
+          );
+        });
       }
 
       // Handle audio response
