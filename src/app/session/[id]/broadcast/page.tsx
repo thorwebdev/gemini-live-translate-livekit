@@ -190,7 +190,13 @@ function BroadcastControls({ sessionId }: { sessionId: string }) {
       <div style={{ paddingTop: 28 }}>
         <button
           className="btn-danger"
-          onClick={() => {
+          onClick={async () => {
+            try {
+              // Explicitly notify server that broadcast is ended to stop all translator bots
+              await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+            } catch (err) {
+              console.error("Failed to explicitly delete session on broadcast end:", err);
+            }
             room.disconnect();
             window.location.href = "/";
           }}

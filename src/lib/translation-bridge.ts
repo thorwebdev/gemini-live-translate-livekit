@@ -42,6 +42,7 @@ export class TranslationBridge {
   public readonly identity: string;
   public status: BridgeStatus = "starting";
   public subscriberCount: number = 0;
+  public onStop?: () => void;
 
   // Gemini Live API config
   private readonly geminiApiKey: string;
@@ -129,6 +130,10 @@ export class TranslationBridge {
     this.audioSource = null;
     this.localTrack = null;
     this.geminiSetupComplete = false;
+
+    if (this.onStop) {
+      this.onStop();
+    }
   }
 
   private async joinLiveKitRoom(): Promise<void> {
@@ -158,6 +163,23 @@ export class TranslationBridge {
       );
       this.status = "closed";
     });
+
+    this.room.on(
+      RoomEvent.ParticipantDisconnected,
+      (participant: RemoteParticipant) => {
+        if (participant.identity === this.organizerIdentity) {
+          console.log(
+            `[TranslationBridge:${this.targetLanguage}] Organizer ${this.organizerIdentity} disconnected, stopping bridge`
+          );
+          this.stop().catch((err) => {
+            console.error(
+              `[TranslationBridge:${this.targetLanguage}] Error stopping bridge after organizer disconnect:`,
+              err
+            );
+          });
+        }
+      }
+    );
 
     await this.room.connect(this.livekitUrl, token, {
       autoSubscribe: false,

@@ -102,6 +102,20 @@ class TranslationSessionManager {
       config
     );
 
+    bridge.onStop = () => {
+      const languageMap = this.translations.get(sessionId);
+      if (languageMap) {
+        languageMap.delete(targetLanguage);
+        if (languageMap.size === 0) {
+          this.translations.delete(sessionId);
+          this.sessions.delete(sessionId);
+          console.log(
+            `[SessionManager] Cleaned up session ${sessionId} as all translation bridges stopped.`
+          );
+        }
+      }
+    };
+
     // Store the bridge before starting (to prevent race conditions)
     if (!languageMap) {
       languageMap = new Map();
