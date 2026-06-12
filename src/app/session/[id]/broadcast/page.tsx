@@ -6,8 +6,6 @@ import {
   useLocalParticipant,
   useRoomContext,
   useRemoteParticipants,
-  TrackToggle,
-  useTracks,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Track } from "livekit-client";
@@ -42,9 +40,24 @@ function BroadcastControls({
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
-  const [isMicOn, setIsMicOn] = useState(false);
-  const audioTracks = useTracks([Track.Source.Microphone]);
   const remoteParticipants = useRemoteParticipants();
+
+  // Custom audio mixer states
+  const [isMicEnabled, setIsMicEnabled] = useState(false);
+  const [isTabAudioEnabled, setIsTabAudioEnabled] = useState(false);
+  const [micVolume, setMicVolume] = useState(100);
+  const [tabVolume, setTabVolume] = useState(100);
+
+  // References to keep Web Audio API elements alive
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const destinationNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micGainNodeRef = useRef<GainNode | null>(null);
+  const tabStreamRef = useRef<MediaStream | null>(null);
+  const tabSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const tabGainNodeRef = useRef<GainNode | null>(null);
+  const publishedTrackPubRef = useRef<any>(null);
 
   // Count only real attendees, not translator bots
   const listenerCount = remoteParticipants.filter(
@@ -72,12 +85,224 @@ function BroadcastControls({
     return () => clearInterval(interval);
   }, [fetchTranslations]);
 
+  // Main AudioContext and track publishing lifecycle
   useEffect(() => {
-    const hasAudio = audioTracks.some(
-      (t) => t.participant.identity === localParticipant.identity
-    );
-    setIsMicOn(hasAudio);
-  }, [audioTracks, localParticipant.identity]);
+    if (!room || !room.localParticipant) return;
+
+    let active = true;
+    let localPub: any = null;
+
+    async function initAudio() {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx = new AudioContextClass();
+        audioContextRef.current = ctx;
+
+        const dest = ctx.createMediaStreamDestination();
+        destinationNodeRef.current = dest;
+
+        const mixedTrack = dest.stream.getAudioTracks()[0];
+
+        if (active && room.localParticipant) {
+          const pub = await room.localParticipant.publishTrack(mixedTrack, {
+            name: "broadcast-audio",
+            source: Track.Source.Microphone,
+          });
+          publishedTrackPubRef.current = pub;
+          localPub = pub;
+          console.log("Published mixed audio track:", pub.sid);
+        }
+      } catch (err) {
+        console.error("Failed to initialize client audio mixer:", err);
+      }
+    }
+
+    initAudio();
+
+    return () => {
+      active = false;
+      if (localPub && room.localParticipant) {
+        room.localParticipant.unpublishTrack(localPub.track).catch((err) => {
+          console.error("Failed to unpublish mixed track:", err);
+        });
+      }
+      
+      // Stop all streams and close AudioContext
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+      }
+      if (micSourceNodeRef.current) {
+        micSourceNodeRef.current.disconnect();
+        micSourceNodeRef.current = null;
+      }
+      if (micGainNodeRef.current) {
+        micGainNodeRef.current.disconnect();
+        micGainNodeRef.current = null;
+      }
+      if (tabStreamRef.current) {
+        tabStreamRef.current.getTracks().forEach((track) => track.stop());
+        tabStreamRef.current = null;
+      }
+      if (tabSourceNodeRef.current) {
+        tabSourceNodeRef.current.disconnect();
+        tabSourceNodeRef.current = null;
+      }
+      if (tabGainNodeRef.current) {
+        tabGainNodeRef.current.disconnect();
+        tabGainNodeRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      destinationNodeRef.current = null;
+      publishedTrackPubRef.current = null;
+    };
+  }, [room, room?.localParticipant]);
+
+  const toggleMicrophone = async () => {
+    const ctx = audioContextRef.current;
+    const dest = destinationNodeRef.current;
+    if (!ctx || !dest) return;
+
+    if (isMicEnabled) {
+      if (micSourceNodeRef.current) {
+        micSourceNodeRef.current.disconnect();
+        micSourceNodeRef.current = null;
+      }
+      if (micGainNodeRef.current) {
+        micGainNodeRef.current.disconnect();
+        micGainNodeRef.current = null;
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+      }
+      setIsMicEnabled(false);
+    } else {
+      try {
+        await ctx.resume();
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStreamRef.current = stream;
+
+        const source = ctx.createMediaStreamSource(stream);
+        micSourceNodeRef.current = source;
+
+        const gainNode = ctx.createGain();
+        gainNode.gain.setValueAtTime(micVolume / 100, ctx.currentTime);
+        micGainNodeRef.current = gainNode;
+
+        source.connect(gainNode);
+        gainNode.connect(dest);
+
+        setIsMicEnabled(true);
+      } catch (err) {
+        console.error("Failed to access microphone:", err);
+        alert("Could not access microphone: " + (err as Error).message);
+      }
+    }
+  };
+
+  const toggleTabAudio = async () => {
+    const ctx = audioContextRef.current;
+    const dest = destinationNodeRef.current;
+    if (!ctx || !dest) return;
+
+    if (isTabAudioEnabled) {
+      if (tabSourceNodeRef.current) {
+        tabSourceNodeRef.current.disconnect();
+        tabSourceNodeRef.current = null;
+      }
+      if (tabGainNodeRef.current) {
+        tabGainNodeRef.current.disconnect();
+        tabGainNodeRef.current = null;
+      }
+      if (tabStreamRef.current) {
+        tabStreamRef.current.getTracks().forEach((track) => track.stop());
+        tabStreamRef.current = null;
+      }
+      setIsTabAudioEnabled(false);
+    } else {
+      try {
+        await ctx.resume();
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { displaySurface: "browser" },
+          audio: true,
+        });
+
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          stream.getTracks().forEach((track) => track.stop());
+          alert("No audio track selected. Make sure to check the 'Share tab audio' checkbox in the system sharing prompt.");
+          return;
+        }
+
+        tabStreamRef.current = stream;
+
+        const source = ctx.createMediaStreamSource(stream);
+        tabSourceNodeRef.current = source;
+
+        const gainNode = ctx.createGain();
+        gainNode.gain.setValueAtTime(tabVolume / 100, ctx.currentTime);
+        tabGainNodeRef.current = gainNode;
+
+        source.connect(gainNode);
+        gainNode.connect(dest);
+
+        setIsTabAudioEnabled(true);
+
+        const handleTrackEnded = () => {
+          if (tabSourceNodeRef.current) {
+            tabSourceNodeRef.current.disconnect();
+            tabSourceNodeRef.current = null;
+          }
+          if (tabGainNodeRef.current) {
+            tabGainNodeRef.current.disconnect();
+            tabGainNodeRef.current = null;
+          }
+          stream.getTracks().forEach((track) => track.stop());
+          tabStreamRef.current = null;
+          setIsTabAudioEnabled(false);
+        };
+
+        audioTracks[0].onended = handleTrackEnded;
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoTracks[0].onended = handleTrackEnded;
+        }
+      } catch (err) {
+        console.error("Failed to capture tab audio:", err);
+        if ((err as Error).name !== "NotAllowedError") {
+          alert("Could not capture tab audio: " + (err as Error).message);
+        }
+      }
+    }
+  };
+
+  const handleMicVolumeChange = (vol: number) => {
+    setMicVolume(vol);
+    if (micGainNodeRef.current && audioContextRef.current) {
+      micGainNodeRef.current.gain.setValueAtTime(vol / 100, audioContextRef.current.currentTime);
+    }
+  };
+
+  const handleTabVolumeChange = (vol: number) => {
+    setTabVolume(vol);
+    if (tabGainNodeRef.current && audioContextRef.current) {
+      tabGainNodeRef.current.gain.setValueAtTime(vol / 100, audioContextRef.current.currentTime);
+    }
+  };
+
+  const isAudioActive = isMicEnabled || isTabAudioEnabled;
+  let statusText = "Muted";
+  if (isMicEnabled && isTabAudioEnabled) {
+    statusText = "Live (Mic + Tab)";
+  } else if (isMicEnabled) {
+    statusText = "Live (Mic)";
+  } else if (isTabAudioEnabled) {
+    statusText = "Live (Tab)";
+  }
 
   return (
     <div className="container enter">
@@ -89,7 +314,7 @@ function BroadcastControls({
         <p className="mono">{sessionId}</p>
       </div>
 
-      {/* Mic status */}
+      {/* Audio Inputs */}
       <div style={{ marginBottom: 40 }}>
         <div
           style={{
@@ -100,17 +325,17 @@ function BroadcastControls({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div className={`waveform ${isMicOn ? "active" : "idle"}`}>
+            <div className={`waveform ${isAudioActive ? "active" : "idle"}`}>
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="waveform-bar" />
               ))}
             </div>
             <span
               className="status"
-              style={{ color: isMicOn ? "var(--success)" : "var(--fg-ghost)" }}
+              style={{ color: isAudioActive ? "var(--success)" : "var(--fg-ghost)" }}
             >
-              <span className={`status-dot ${isMicOn ? "pulse" : ""}`} />
-              {isMicOn ? "Live" : "Muted"}
+              <span className={`status-dot ${isAudioActive ? "pulse" : ""}`} />
+              {statusText}
             </span>
           </div>
 
@@ -119,21 +344,99 @@ function BroadcastControls({
           </span>
         </div>
 
-        <TrackToggle
-          source={Track.Source.Microphone}
-          style={{
-            width: "100%",
-            padding: "14px 32px",
-            fontFamily: "var(--font-body)",
-            fontSize: "14px",
-            fontWeight: 500,
-            border: isMicOn ? "1px solid var(--error)" : "none",
-            borderRadius: 0,
-            background: isMicOn ? "transparent" : "var(--fg)",
-            color: isMicOn ? "var(--error)" : "var(--bg)",
-            cursor: "pointer",
-          }}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Microphone Box */}
+          <div
+            style={{
+              padding: "16px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-elevated)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 500, fontSize: "14px" }}>Microphone</span>
+              <button
+                onClick={toggleMicrophone}
+                className="btn"
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "12px",
+                  border: isMicEnabled ? "1px solid var(--error)" : "none",
+                  background: isMicEnabled ? "transparent" : "var(--fg)",
+                  color: isMicEnabled ? "var(--error)" : "var(--bg)",
+                  cursor: "pointer",
+                }}
+              >
+                {isMicEnabled ? "Disable" : "Enable"}
+              </button>
+            </div>
+            {isMicEnabled && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span className="mono" style={{ width: "32px", fontSize: "11px" }}>Vol</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={micVolume}
+                  onChange={(e) => handleMicVolumeChange(Number(e.target.value))}
+                  style={{ flexGrow: 1, accentColor: "var(--fg)", cursor: "pointer" }}
+                />
+                <span className="mono" style={{ width: "40px", textAlign: "right", fontSize: "11px" }}>
+                  {micVolume}%
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Browser Tab Audio Box */}
+          <div
+            style={{
+              padding: "16px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-elevated)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 500, fontSize: "14px" }}>Browser Tab Audio</span>
+              <button
+                onClick={toggleTabAudio}
+                className="btn"
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "12px",
+                  border: isTabAudioEnabled ? "1px solid var(--error)" : "none",
+                  background: isTabAudioEnabled ? "transparent" : "var(--fg)",
+                  color: isTabAudioEnabled ? "var(--error)" : "var(--bg)",
+                  cursor: "pointer",
+                }}
+              >
+                {isTabAudioEnabled ? "Stop Sharing" : "Share Tab"}
+              </button>
+            </div>
+            {isTabAudioEnabled && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span className="mono" style={{ width: "32px", fontSize: "11px" }}>Vol</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={tabVolume}
+                  onChange={(e) => handleTabVolumeChange(Number(e.target.value))}
+                  style={{ flexGrow: 1, accentColor: "var(--fg)", cursor: "pointer" }}
+                />
+                <span className="mono" style={{ width: "40px", textAlign: "right", fontSize: "11px" }}>
+                  {tabVolume}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <hr className="rule" />
@@ -359,7 +662,7 @@ export default function BroadcastPage({
     <div className="page page-top">
       <LiveKitRoom
         video={false}
-        audio={true}
+        audio={false}
         token={token}
         serverUrl={livekitUrl}
         style={{
