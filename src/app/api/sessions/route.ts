@@ -7,6 +7,15 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const organizerName = body.organizerName || "organizer";
+    const password = body.password;
+
+    const expectedPassword = process.env.BROADCAST_PASSWORD;
+    if (expectedPassword && password !== expectedPassword) {
+      return NextResponse.json(
+        { error: "Incorrect password" },
+        { status: 401 }
+      );
+    }
 
     const sessionId = uuidv4().slice(0, 8); // Short, readable ID
     const organizerIdentity = `organizer-${organizerName}`;

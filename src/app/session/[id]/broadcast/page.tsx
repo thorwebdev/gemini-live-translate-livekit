@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, use, useRef } from "react";
+import { useEffect, useState, useCallback, use, useRef, FormEvent } from "react";
 import {
   LiveKitRoom,
   useLocalParticipant,
@@ -225,29 +225,109 @@ export default function BroadcastPage({
   const [token, setToken] = useState("");
   const [livekitUrl, setLivekitUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [passwordPromptRequired, setPasswordPromptRequired] = useState(false);
+  const [localPassword, setLocalPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const isEndingRef = useRef(false);
 
   const handleEndBroadcast = useCallback(() => {
     isEndingRef.current = true;
   }, []);
 
-  useEffect(() => {
-    async function fetchToken() {
-      try {
-        const identity = `organizer-host`;
-        const res = await fetch(
-          `/api/token?room=${sessionId}&identity=${identity}&role=organizer`
-        );
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        setToken(data.token);
-        setLivekitUrl(data.serverUrl);
-      } catch (err) {
-        setError((err as Error).message);
+  const fetchToken = useCallback(async (pass: string) => {
+    try {
+      const identity = `organizer-host`;
+      const url = `/api/token?room=${sessionId}&identity=${identity}&role=organizer${pass ? `&password=${encodeURIComponent(pass)}` : ""}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      
+      if (res.status === 401) {
+        setPasswordPromptRequired(true);
+        return false;
       }
+      
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to fetch token");
+      }
+      
+      if (pass) {
+        sessionStorage.setItem("broadcast_password", pass);
+      }
+      setToken(data.token);
+      setLivekitUrl(data.serverUrl);
+      setPasswordPromptRequired(false);
+      return true;
+    } catch (err) {
+      setError((err as Error).message);
+      return false;
     }
-    fetchToken();
   }, [sessionId]);
+
+  useEffect(() => {
+    const cachedPass = sessionStorage.getItem("broadcast_password") || "";
+    fetchToken(cachedPass);
+  }, [fetchToken]);
+
+  const handlePasswordSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setVerifying(true);
+    setPasswordError(null);
+    const success = await fetchToken(localPassword);
+    setVerifying(false);
+    if (!success && !error) {
+      setPasswordError("Incorrect password");
+    }
+  };
+
+  if (passwordPromptRequired) {
+    return (
+      <div className="page enter">
+        <div className="container" style={{ textAlign: "center" }}>
+          <h1 className="display display-md" style={{ marginBottom: 12 }}>
+            <em>Password</em> Required
+          </h1>
+          <p className="body-sm" style={{ marginBottom: 32 }}>
+            This broadcast session is password-protected.
+          </p>
+          <form onSubmit={handlePasswordSubmit}>
+            <div style={{ marginBottom: 20 }}>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter password"
+                value={localPassword}
+                onChange={(e) => setLocalPassword(e.target.value)}
+                style={{ textAlign: "center" }}
+                disabled={verifying}
+                required
+              />
+            </div>
+            {passwordError && (
+              <p className="body-sm" style={{ color: "var(--error)", marginBottom: 20 }}>
+                {passwordError}
+              </p>
+            )}
+            <button
+              type="submit"
+              className="btn btn-dark"
+              style={{ width: "100%" }}
+              disabled={verifying}
+            >
+              {verifying ? "Verifying…" : "Submit"}
+            </button>
+          </form>
+          <button
+            className="btn btn-ghost"
+            onClick={() => (window.location.href = "/")}
+            style={{ marginTop: 16 }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -294,7 +374,6 @@ export default function BroadcastPage({
           }
         }}
       >
-
         <BroadcastControls sessionId={sessionId} onEndBroadcast={handleEndBroadcast} />
       </LiveKitRoom>
     </div>

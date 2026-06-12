@@ -268,6 +268,27 @@ body {
   background: var(--bg);
 }
 
+.input-field {
+  width: 100%;
+  padding: 14px 16px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  transition: border-color 0.2s ease;
+}
+
+.input-field:hover {
+  border-color: var(--fg-tertiary);
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--fg);
+}
+
 /* ——————————————————————————————————————
    Status
    —————————————————————————————————————— */

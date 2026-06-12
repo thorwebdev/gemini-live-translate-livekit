@@ -71,6 +71,7 @@ LIVEKIT_API_SECRET=secret
 NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_URL=ws://localhost:7880
 GEMINI_API_KEY=your-gemini-api-key-here
+BROADCAST_PASSWORD=optional-secure-password
 ```
 
 ### 4. Run the app
@@ -129,15 +130,33 @@ Key settings:
 - `--timeout 3600` — allows sessions up to 1 hour
 - `--no-cpu-throttling` — keeps CPU allocated between requests (needed for audio processing)
 
-### Authentication (optional)
+## Security & Authentication (optional)
 
+### 1. Simple Password Protection (Broadcasters Only)
+To protect broadcast/session creation without restricting the public watch pages, you can set the `BROADCAST_PASSWORD` environment variable.
+
+- **Local Dev**: Add `BROADCAST_PASSWORD=your-secret-password` to `.env.local`.
+- **Cloud Run**: Create a secret in Google Secret Manager and bind it to your service using `--update-secrets`:
+  ```bash
+  # 1. Create the secret in Secret Manager
+  echo -n "your-secret-password" | gcloud secrets create broadcast-password --data-file=-
+
+  # 2. Update your Cloud Run service to mount the secret as an environment variable
+  gcloud run services update live-translate \
+    --region=us-central1 \
+    --update-secrets="BROADCAST_PASSWORD=broadcast-password:latest"
+  ```
+
+When configured, the application will automatically prompt organizers for the password before creating a session or accessing the broadcast page. The password is cached in the host's `sessionStorage` to allow page reloads.
+
+### 2. Full Access Control (Identity-Aware Proxy)
 To restrict access to specific Google accounts, enable Identity-Aware Proxy (IAP). This adds a Google Sign-In page — only authorized users can access the app.
 
 ```bash
 gcloud run services update live-translate --region us-central1 --iap
 ```
 
-See [docs/authentication.md](docs/authentication.md) for full setup instructions.
+> **Note:** IAP locks down the entire app, including the attendee watch page. See [docs/authentication.md](docs/authentication.md) for full setup instructions.
 
 ## Usage
 

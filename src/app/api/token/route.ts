@@ -14,6 +14,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const isOrganizer = role === "organizer";
+  const expectedPassword = process.env.BROADCAST_PASSWORD;
+  if (isOrganizer && expectedPassword) {
+    const password = req.nextUrl.searchParams.get("password");
+    if (password !== expectedPassword) {
+      return NextResponse.json(
+        { error: "Incorrect password" },
+        { status: 401 }
+      );
+    }
+  }
+
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
 
@@ -29,8 +41,6 @@ export async function GET(req: NextRequest) {
     name: identity,
     ttl: "4h",
   });
-
-  const isOrganizer = role === "organizer";
 
   at.addGrant({
     roomJoin: true,

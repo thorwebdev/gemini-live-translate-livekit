@@ -1,24 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [passwordRequired, setPasswordRequired] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function checkAuthStatus() {
+      try {
+        const res = await fetch("/api/auth/status");
+        const data = await res.json();
+        setPasswordRequired(data.passwordRequired);
+      } catch (err) {
+        console.error("Failed to check auth status:", err);
+      }
+    }
+    checkAuthStatus();
+  }, []);
 
   async function createSession() {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizerName: "host" }),
+        body: JSON.stringify({ organizerName: "host", password }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create session");
+      }
+      if (passwordRequired) {
+        sessionStorage.setItem("broadcast_password", password);
+      }
       router.push(`/session/${data.sessionId}/broadcast`);
     } catch (err) {
       console.error("Failed to create session:", err);
+      setError((err as Error).message);
       setLoading(false);
     }
   }
@@ -39,6 +63,27 @@ export default function Home() {
           Broadcast your voice. Attendees choose their language.
           Translation spins up on demand.
         </p>
+
+        {/* Password input if required */}
+        {passwordRequired && (
+          <div className="enter-d2" style={{ maxWidth: 340, margin: "0 auto 20px" }}>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="Enter broadcast password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{ textAlign: "center" }}
+            />
+          </div>
+        )}
+
+        {/* Error message */}
+        {error && (
+          <p className="body-sm enter-d2" style={{ color: "var(--error)", marginBottom: 20 }}>
+            {error}
+          </p>
+        )}
 
         {/* CTA */}
         <div className="enter-d2">
