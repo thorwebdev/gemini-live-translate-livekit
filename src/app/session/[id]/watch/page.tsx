@@ -32,6 +32,48 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   const currentLanguageRef = useRef(currentLanguage);
   const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
+  const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+
+  // Manage Screen Wake Lock to prevent the phone/device from sleeping
+  useEffect(() => {
+    if (typeof window === "undefined" || !("wakeLock" in navigator)) {
+      return;
+    }
+
+    let wakeLock: any = null;
+
+    async function requestWakeLock() {
+      try {
+        wakeLock = await (navigator as any).wakeLock.request("screen");
+        setIsWakeLockActive(true);
+        
+        wakeLock.addEventListener("release", () => {
+          setIsWakeLockActive(false);
+        });
+      } catch (err) {
+        console.error("Failed to acquire Screen Wake Lock:", err);
+      }
+    }
+
+    requestWakeLock();
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible" && !wakeLock) {
+        await requestWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (wakeLock) {
+        wakeLock.release().catch((err: any) => {
+          console.error("Failed to release Screen Wake Lock:", err);
+        });
+      }
+    };
+  }, []);
 
   const organizerParticipant = remoteParticipants.find((p) =>
     p.identity.startsWith("organizer-")
@@ -236,6 +278,37 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
                 Waiting for broadcast
               </span>
             )}
+
+            {isWakeLockActive && (
+              <span
+                className="status status--active"
+                style={{
+                  marginLeft: 12,
+                  padding: "4px 8px",
+                  background: "var(--success-soft)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "4px",
+                  fontSize: "11px",
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ marginRight: 4, verticalAlign: "middle" }}
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Screen Awake
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -397,6 +470,7 @@ export default function WatchPage({
         token={token}
         serverUrl={livekitUrl}
         connectOptions={{ autoSubscribe: false }}
+        options={{ disconnectOnPageLeave: false }}
         style={{
           display: "flex",
           flexDirection: "column",
