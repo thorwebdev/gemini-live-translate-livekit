@@ -43,7 +43,7 @@ gcloud run deploy live-translate \
   --region us-central1 \
   --no-allow-unauthenticated \
   --iap \
-  --min-instances 1 \
+  --min-instances 0 \
   --max-instances 1 \
   --timeout 3600 \
   --no-cpu-throttling \

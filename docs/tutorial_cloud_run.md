@@ -195,16 +195,16 @@ gcloud secrets add-iam-policy-binding livekit-api-secret \
 ### 3. Deploy the Service!
 
 Run the deployment command. Note the specific Cloud Run production scaling configurations required:
-* `--min-instances 1`: Prevents the container from scaling to 0 when active translation workers are running in the background.
+* `--min-instances 0`: Allows the service to scale completely to zero when inactive to save costs. The broadcaster client page will dynamically ping the server to keep the container active during live events.
 * `--max-instances 1`: Restricts the service to a single container to preserve the in-memory singleton state of active translation sessions (scale horizontally later by integrating Redis).
-* `--no-cpu-throttling`: Keeps the CPU allocated between WebRTC packets to ensure zero latency translation audio.
+* `--no-cpu-throttling`: Keeps the CPU allocated between WebRTC packets to ensure zero latency translation audio (only billed while active).
 
 ```bash
 gcloud run deploy live-translate \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --min-instances 1 \
+  --min-instances 0 \
   --max-instances 1 \
   --timeout 3600 \
   --no-cpu-throttling \
