@@ -72,11 +72,11 @@ When deploying Next.js behind Docker/Cloud Run, developers often fall into a mas
 
 In standard Next.js, `NEXT_PUBLIC_` env vars are evaluated and baked into your Javascript bundle *at build time*. But when deploying to Cloud Run, your environment variables are only injected *at runtime*.
 
-If you build your docker image on Cloud Build and define `NEXT_PUBLIC_LIVEKIT_URL` inside Cloud Run, the browser will compile with `undefined` and fall back to `ws://localhost:7880`. The browser will crash trying to connect to localhost!
+If you build your docker image on Cloud Build and try to read client-side variables like `process.env.NEXT_PUBLIC_LIVEKIT_URL` (which we have removed from this codebase), the browser will compile with `undefined` and fall back to `ws://localhost:7880`. The browser will crash trying to connect to localhost!
 
 ### The Solution: Server-Delivered Configuration
 
-Instead of reading `process.env.NEXT_PUBLIC_LIVEKIT_URL` in client components, we fetch it dynamically from our server-side token endpoint!
+Instead of reading environment variables in client components, we fetch the LiveKit URL dynamically from our server-side token endpoint!
 
 1. In `/api/token/route.ts` (which runs at runtime on the server and has access to raw env vars), we return both the JWT token and the correct LiveKit Server URL:
    ```typescript

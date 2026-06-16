@@ -52,7 +52,6 @@ If you want to verify that the Next.js API logic works independently of Cloud Ru
    GEMINI_API_KEY=your-gemini-key
    LIVEKIT_API_KEY=your-livekit-key
    LIVEKIT_API_SECRET=your-livekit-secret
-   NEXT_PUBLIC_LIVEKIT_URL=wss://your-livekit.cloud
    LIVEKIT_URL=wss://your-livekit.cloud
    ```
 

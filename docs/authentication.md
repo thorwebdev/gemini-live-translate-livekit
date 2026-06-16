@@ -52,7 +52,6 @@ GEMINI_API_KEY=gemini-api-key:latest,\
 LIVEKIT_API_KEY=livekit-api-key:latest,\
 LIVEKIT_API_SECRET=livekit-api-secret:latest" \
   --set-env-vars "\
-NEXT_PUBLIC_LIVEKIT_URL=$NEXT_PUBLIC_LIVEKIT_URL,\
 LIVEKIT_URL=$LIVEKIT_URL"
 ```
 

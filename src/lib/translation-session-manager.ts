@@ -90,7 +90,7 @@ class TranslationSessionManager {
 
     const config = {
       geminiApiKey: process.env.GEMINI_API_KEY!,
-      livekitUrl: process.env.LIVEKIT_URL || process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880",
+      livekitUrl: process.env.LIVEKIT_URL || "ws://localhost:7880",
       livekitApiKey: process.env.LIVEKIT_API_KEY!,
       livekitApiSecret: process.env.LIVEKIT_API_SECRET!,
     };

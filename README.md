@@ -68,7 +68,6 @@ Edit `.env.local`:
 ```env
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
-NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_URL=ws://localhost:7880
 GEMINI_API_KEY=your-gemini-api-key-here
 BROADCAST_PASSWORD=optional-secure-password
@@ -119,7 +118,6 @@ GEMINI_API_KEY=gemini-api-key:latest,\
 LIVEKIT_API_KEY=livekit-api-key:latest,\
 LIVEKIT_API_SECRET=livekit-api-secret:latest" \
   --set-env-vars "\
-NEXT_PUBLIC_LIVEKIT_URL=wss://your-project.livekit.cloud,\
 LIVEKIT_URL=wss://your-project.livekit.cloud"
 ```
 
