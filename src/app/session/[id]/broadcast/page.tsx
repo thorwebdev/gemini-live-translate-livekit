@@ -90,21 +90,6 @@ function BroadcastControls({
     };
   }, []);
 
-  // Keep-alive ping to prevent Cloud Run from scaling down to zero during active broadcast.
-  // The broadcaster browser pings the server every 20 seconds to simulate active traffic.
-  useEffect(() => {
-    if (!room) return;
-
-    const interval = setInterval(() => {
-      fetch("/api/ping").catch(() => {});
-    }, 20000); // 20s interval is well under Cloud Run's typical idle timeout
-
-    // Fire first ping immediately
-    fetch("/api/ping").catch(() => {});
-
-    return () => clearInterval(interval);
-  }, [room]);
-
   // References to keep Web Audio API elements alive
   const audioContextRef = useRef<AudioContext | null>(null);
   const destinationNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);

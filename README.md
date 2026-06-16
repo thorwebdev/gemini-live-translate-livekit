@@ -157,8 +157,9 @@ Because this demo architecture maintains active translation sessions via an in-m
 
 #### 5. Dynamic "Scale to Zero" & Keep-Alive
 * **The issue:** Since listeners connect directly to LiveKit and the bots stream audio over outbound connections, a container with `--min-instances 0` receives exactly 0 inbound HTTP requests during a broadcast. By default, Cloud Run would think the container is idle and shut it down mid-event.
-* **The solution:** The broadcaster client page dynamically pings the server at `/api/ping` every 20 seconds. This inbound traffic tricks the Cloud Run autoscaler into keeping the container warm for the entire broadcast. 
+* **The solution:** The broadcaster client page naturally queries the active translation status endpoint (`/api/translate/status`) every 3 seconds to monitor listeners. This continuous inbound polling traffic naturally keeps the Cloud Run container warm for the entire broadcast. 
 * **The result:** You can safely deploy with `--min-instances 0` to pay absolutely nothing when the app is idle. The container automatically boots on the first request, stays alive during active broadcasts, and shuts down automatically 15 minutes after the broadcaster leaves.
+
 
 
 
