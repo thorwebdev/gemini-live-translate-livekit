@@ -169,18 +169,18 @@ gcloud secrets add-iam-policy-binding livekit-api-secret \
 ```
 
 ### 3. Deploy the Service
-Run the deployment command. Note the specific Cloud Run production scaling configurations required:
-* `--min-instances 1`: Keeps the container warm so active sessions aren't killed.
+Run the deployment command. Note the specific Cloud Run configurations required:
+* `--min-instances 0`: Keeps idle costs at $0. An active broadcaster page will dynamically ping the server to keep the instance warm during live events.
 * `--max-instances 1`: The `TranslationSessionManager` singleton requires a single instance.
 * `--timeout 3600`: Allows translation sessions up to 1 hour.
-* `--no-cpu-throttling`: Keeps CPU allocated between requests to ensure zero audio processing lag.
+* `--no-cpu-throttling`: Keeps CPU allocated between requests to ensure zero audio processing lag (only billed while the instance is active).
 
 ```bash
 gcloud run deploy live-translate \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --min-instances 1 \
+  --min-instances 0 \
   --max-instances 1 \
   --timeout 3600 \
   --no-cpu-throttling \

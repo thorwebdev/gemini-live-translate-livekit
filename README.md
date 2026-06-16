@@ -109,7 +109,7 @@ gcloud run deploy live-translate \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --min-instances 1 \
+  --min-instances 0 \
   --max-instances 1 \
   --timeout 3600 \
   --no-cpu-throttling \
@@ -123,10 +123,46 @@ LIVEKIT_URL=wss://your-project.livekit.cloud"
 
 Key settings:
 - `--set-secrets` — injects secrets from Secret Manager at runtime (never stored in the image or Cloud Run config)
-- `--min-instances 1` — keeps the container warm so active sessions aren't killed
+- `--min-instances 0` — allows the service to scale completely to zero when inactive to save costs
 - `--max-instances 1` — the `TranslationSessionManager` singleton requires a single instance
 - `--timeout 3600` — allows sessions up to 1 hour
-- `--no-cpu-throttling` — keeps CPU allocated between requests (needed for audio processing)
+- `--no-cpu-throttling` — keeps CPU allocated between requests (needed for audio processing, only billed when instances are active)
+
+### Scaling & Resource Limits (Learnings from Live Events)
+
+When running live events with high listener counts (e.g., 1k+ concurrent users) and multiple active translated languages (e.g., 20+ languages), pay close attention to the following resource and quota limits:
+
+#### 1. Cloud Run CPU & Memory (OOM Protection)
+* **The issue:** The `@livekit/rtc-node` SDK runs native C++ WebRTC client routines. Every active translation bridge opens a new PeerConnection and manages real-time audio encoding/decoding. This consumes ~20–30 MiB of RAM and ~10% of a vCPU core per language. 
+* **The symptom:** If memory exceeds the default 512 MiB limit, the container will instantly crash with an Out-of-Memory (OOM) error, dropping all active listeners.
+* **The fix:** For 15–20 active languages, allocate at least **4 vCPUs and 4 GiB of memory** (and up to 8 vCPUs / 32 GiB for larger scales):
+  ```bash
+  gcloud run services update live-translate --cpu 4 --memory 4Gi --region us-central1
+  ```
+
+#### 2. Concurrency Limit (Preventing "Rate exceeded")
+* **The issue:** Cloud Run has a default concurrency limit of 80 requests. If 1,000 users try to join/refresh the page at the exact same instant (e.g., right when a link is shared), the excess requests will overflow the queue, and Google Front End (GFE) will reject them with a plain text `Rate exceeded.` error.
+* **The fix:** Increase request concurrency on the container to the maximum of **1000**:
+  ```bash
+  gcloud run services update live-translate --concurrency 1000 --region us-central1
+  ```
+  *(Note: A 4 vCPU container is highly capable of generating thousands of JWT keys concurrently as it is a quick CPU cryptographic operation).*
+
+#### 3. Provider Quota Settings (Gemini & LiveKit)
+* **Gemini API Key:** You must use a **Paid Tier (Tiers 1–3)** Google AI Studio API key. The Free Tier enforces strict limits on concurrent active WebSocket connections (usually 3–5), which will cause bridges to disconnect or fail to start when translating multiple languages simultaneously.
+* **LiveKit Cloud:** The Free Tier of LiveKit Cloud has a cap of **100 concurrent connections**. For large audiences, make sure your LiveKit Cloud account is upgraded to the metered paid plan (such as **Ship** or **Scale** tier) which unlocks unlimited concurrent participants.
+
+#### 4. The Autoscaling Constraint
+Because this demo architecture maintains active translation sessions via an in-memory singleton manager (`TranslationSessionManager`), **horizontal autoscaling must be locked to 1 instance** (`--max-instances 1`). Scaling out to multiple containers without database coordination (e.g., Redis) will result in multiple duplicate translation bot instances joining the same room.
+
+#### 5. Dynamic "Scale to Zero" & Keep-Alive
+* **The issue:** Since listeners connect directly to LiveKit and the bots stream audio over outbound connections, a container with `--min-instances 0` receives exactly 0 inbound HTTP requests during a broadcast. By default, Cloud Run would think the container is idle and shut it down mid-event.
+* **The solution:** The broadcaster client page naturally queries the active translation status endpoint (`/api/translate/status`) every 3 seconds to monitor listeners. This continuous inbound polling traffic naturally keeps the Cloud Run container warm for the entire broadcast. 
+* **The result:** You can safely deploy with `--min-instances 0` to pay absolutely nothing when the app is idle. The container automatically boots on the first request, stays alive during active broadcasts, and shuts down automatically 15 minutes after the broadcaster leaves.
+
+
+
+
 
 ## Security & Authentication (optional)
 
