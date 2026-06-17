@@ -6,7 +6,6 @@ import {
   RoomAudioRenderer,
   useRoomContext,
   useTracks,
-  useRemoteParticipants,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
@@ -30,8 +29,30 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const currentLanguageRef = useRef(currentLanguage);
-  const remoteParticipants = useRemoteParticipants();
   const audioTracks = useTracks([Track.Source.Microphone]);
+  const [isOrganizerConnected, setIsOrganizerConnected] = useState(false);
+
+  // Track organizer connection status to avoid useRemoteParticipants hook overhead
+  useEffect(() => {
+    if (!room) return;
+
+    const checkOrganizer = () => {
+      const present = Array.from(room.remoteParticipants.values()).some((p) =>
+        p.identity.startsWith("organizer-")
+      );
+      setIsOrganizerConnected(present);
+    };
+
+    checkOrganizer();
+
+    room.on(RoomEvent.ParticipantConnected, checkOrganizer);
+    room.on(RoomEvent.ParticipantDisconnected, checkOrganizer);
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, checkOrganizer);
+      room.off(RoomEvent.ParticipantDisconnected, checkOrganizer);
+    };
+  }, [room]);
+
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
 
   // Manage Screen Wake Lock to prevent the phone/device from sleeping
@@ -75,9 +96,7 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
     };
   }, []);
 
-  const organizerParticipant = remoteParticipants.find((p) =>
-    p.identity.startsWith("organizer-")
-  );
+
 
   // Listen for transcription data from translator bots
   useEffect(() => {
@@ -145,9 +164,7 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
     if (!room) return;
 
     const updateSubscriptions = () => {
-      const participants = room.remoteParticipants;
-
-      for (const [, participant] of participants) {
+      for (const [, participant] of room.remoteParticipants) {
         const isOrganizer = participant.identity.startsWith("organizer-");
         const isSelectedTranslator =
           translatorIdentity && participant.identity === translatorIdentity;
@@ -168,13 +185,24 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
 
     const handleUpdate = () => updateSubscriptions();
     room.on(RoomEvent.TrackPublished, handleUpdate);
-    room.on(RoomEvent.ParticipantConnected, handleUpdate);
+    
+    // Only run update if the participant that joined is the organizer or our translator bot
+    const handleParticipantConnected = (participant: any) => {
+      const isOrganizer = participant.identity.startsWith("organizer-");
+      const isSelectedTranslator =
+        translatorIdentity && participant.identity === translatorIdentity;
+      if (isOrganizer || isSelectedTranslator) {
+        updateSubscriptions();
+      }
+    };
+
+    room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
 
     return () => {
       room.off(RoomEvent.TrackPublished, handleUpdate);
-      room.off(RoomEvent.ParticipantConnected, handleUpdate);
+      room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
     };
-  }, [room, currentLanguage, translatorIdentity, remoteParticipants]);
+  }, [room, currentLanguage, translatorIdentity]);
  
   // Update local participant attribute when language changes
   useEffect(() => {
@@ -256,7 +284,7 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
     [sessionId]
   );
 
-  const isConnected = organizerParticipant !== undefined;
+  const isConnected = isOrganizerConnected;
 
   return (
     <div className="container enter">

@@ -5,10 +5,9 @@ import {
   LiveKitRoom,
   useLocalParticipant,
   useRoomContext,
-  useRemoteParticipants,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { Track } from "livekit-client";
+import { Track, RoomEvent } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
 
 interface TranslationInfo {
@@ -40,7 +39,28 @@ function BroadcastControls({
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
-  const remoteParticipants = useRemoteParticipants();
+  const [listenerCount, setListenerCount] = useState(0);
+
+  // Track active attendees count without useRemoteParticipants hook overhead
+  useEffect(() => {
+    if (!room) return;
+
+    const updateCount = () => {
+      const count = Array.from(room.remoteParticipants.values()).filter(
+        (p) => !p.identity.startsWith("translator-")
+      ).length;
+      setListenerCount(count);
+    };
+
+    updateCount();
+
+    room.on(RoomEvent.ParticipantConnected, updateCount);
+    room.on(RoomEvent.ParticipantDisconnected, updateCount);
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, updateCount);
+      room.off(RoomEvent.ParticipantDisconnected, updateCount);
+    };
+  }, [room]);
 
   // Custom audio mixer states
   const [isMicEnabled, setIsMicEnabled] = useState(false);
@@ -101,10 +121,7 @@ function BroadcastControls({
   const tabGainNodeRef = useRef<GainNode | null>(null);
   const publishedTrackPubRef = useRef<any>(null);
 
-  // Count only real attendees, not translator bots
-  const listenerCount = remoteParticipants.filter(
-    (p) => !p.identity.startsWith("translator-")
-  ).length;
+
 
   const joinUrl =
     typeof window !== "undefined"
