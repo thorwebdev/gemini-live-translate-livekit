@@ -108,9 +108,8 @@ class TranslationSessionManager {
         languageMap.delete(targetLanguage);
         if (languageMap.size === 0) {
           this.translations.delete(sessionId);
-          this.sessions.delete(sessionId);
           console.log(
-            `[SessionManager] Cleaned up session ${sessionId} as all translation bridges stopped.`
+            `[SessionManager] Cleaned up active translations for session ${sessionId} as all translation bridges stopped.`
           );
         }
       }
