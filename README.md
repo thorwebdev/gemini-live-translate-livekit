@@ -121,6 +121,12 @@ LIVEKIT_API_SECRET=livekit-api-secret:latest" \
 LIVEKIT_URL=wss://your-project.livekit.cloud"
 ```
 
+For subsequent deployments (code changes only, retaining existing secrets and environment variables):
+
+```bash
+gcloud run deploy live-translate --source . --region us-central1
+```
+
 Key settings:
 - `--set-secrets` — injects secrets from Secret Manager at runtime (never stored in the image or Cloud Run config)
 - `--min-instances 0` — allows the service to scale completely to zero when inactive to save costs
