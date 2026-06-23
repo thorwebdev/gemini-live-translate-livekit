@@ -8,6 +8,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState("");
+  const [eventId, setEventId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export default function Home() {
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizerName: "host", password }),
+        body: JSON.stringify({ organizerName: "host", password, eventId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -64,9 +65,18 @@ export default function Home() {
           Translation spins up on demand.
         </p>
 
-        {/* Password input if required */}
-        {passwordRequired && (
-          <div className="enter-d2" style={{ maxWidth: 340, margin: "0 auto 20px" }}>
+        {/* Inputs */}
+        <div
+          className="enter-d2"
+          style={{
+            maxWidth: 340,
+            margin: "0 auto 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          {passwordRequired && (
             <input
               type="password"
               className="input-field"
@@ -74,9 +84,19 @@ export default function Home() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               style={{ textAlign: "center" }}
+              disabled={loading}
             />
-          </div>
-        )}
+          )}
+          <input
+            type="text"
+            className="input-field"
+            placeholder="Event ID (optional, e.g. weekly-sync)"
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
+            style={{ textAlign: "center" }}
+            disabled={loading}
+          />
+        </div>
 
         {/* Error message */}
         {error && (
