@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
+import TranslationSessionManager from "@/lib/translation-session-manager";
 
 // GET /api/token — Generate a LiveKit access token
 export async function GET(req: NextRequest) {
@@ -15,6 +16,20 @@ export async function GET(req: NextRequest) {
   }
 
   const isOrganizer = role === "organizer";
+
+  // Check if session exists in the manager for attendees
+  if (!isOrganizer) {
+    const manager = TranslationSessionManager.getInstance();
+    const session = manager.getSession(room);
+    console.log(`[TokenAPI] Checking session for room "${room}". Found session:`, session);
+    if (!session) {
+      return NextResponse.json(
+        { error: "Broadcast session has not started yet or has ended" },
+        { status: 404 }
+      );
+    }
+  }
+
   const expectedPassword = process.env.BROADCAST_PASSWORD;
   if (isOrganizer && expectedPassword) {
     const password = req.nextUrl.searchParams.get("password");

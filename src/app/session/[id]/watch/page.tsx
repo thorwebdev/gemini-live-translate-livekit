@@ -551,18 +551,19 @@ export default function WatchPage({
   }, [sessionId]);
 
   if (error) {
+    const isInactiveSession = error.includes("not started yet") || error.includes("not found");
     return (
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
           <p className="display display-md" style={{ marginBottom: 16 }}>
-            Something went wrong
+            {isInactiveSession ? "Broadcast Not Started" : "Something went wrong"}
           </p>
           <p className="body-sm" style={{ marginBottom: 32 }}>{error}</p>
           <button
             className="btn btn-outline"
             onClick={() => window.location.reload()}
           >
-            Retry
+            {isInactiveSession ? "Check Again" : "Retry"}
           </button>
         </div>
       </div>

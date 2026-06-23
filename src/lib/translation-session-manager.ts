@@ -22,9 +22,11 @@ export interface SessionInfo {
   createdAt: Date;
 }
 
-class TranslationSessionManager {
-  private static instance: TranslationSessionManager;
+const globalForSessionManager = global as unknown as {
+  sessionManagerInstance: TranslationSessionManager;
+};
 
+class TranslationSessionManager {
   // Map<sessionId, Map<languageCode, TranslationBridge>>
   private translations: Map<string, Map<string, TranslationBridge>> = new Map();
 
@@ -34,10 +36,10 @@ class TranslationSessionManager {
   private constructor() {}
 
   static getInstance(): TranslationSessionManager {
-    if (!TranslationSessionManager.instance) {
-      TranslationSessionManager.instance = new TranslationSessionManager();
+    if (!globalForSessionManager.sessionManagerInstance) {
+      globalForSessionManager.sessionManagerInstance = new TranslationSessionManager();
     }
-    return TranslationSessionManager.instance;
+    return globalForSessionManager.sessionManagerInstance;
   }
 
   // Session management
@@ -201,13 +203,13 @@ class TranslationSessionManager {
 
   async removeAllTranslations(sessionId: string): Promise<void> {
     const languageMap = this.translations.get(sessionId);
-    if (!languageMap) return;
-
-    for (const [, bridge] of languageMap) {
-      await bridge.stop();
+    if (languageMap) {
+      for (const [, bridge] of languageMap) {
+        await bridge.stop();
+      }
+      languageMap.clear();
+      this.translations.delete(sessionId);
     }
-    languageMap.clear();
-    this.translations.delete(sessionId);
     this.sessions.delete(sessionId);
     console.log(
       `[SessionManager] Removed all bridges and session for ${sessionId}`
