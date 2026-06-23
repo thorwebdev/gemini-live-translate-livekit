@@ -19,6 +19,38 @@ interface TranscriptEntry {
   timestamp: number;
 }
 
+function splitIntoParagraphs(text: string, sentencesPerParagraph = 2): string[] {
+  // A sentence ends with a punctuation mark (. ? !) followed by space or end of string.
+  const sentenceRegex = /[^.!?]+[.!?]+(?:\s+|$)/g;
+  const matches = text.match(sentenceRegex);
+
+  if (!matches) {
+    return [text];
+  }
+
+  const paragraphs: string[] = [];
+  for (let i = 0; i < matches.length; i += sentencesPerParagraph) {
+    const chunk = matches.slice(i, i + sentencesPerParagraph).join("").trim();
+    if (chunk) {
+      paragraphs.push(chunk);
+    }
+  }
+
+  const matchedTextLength = matches.join("").length;
+  if (matchedTextLength < text.length) {
+    const remaining = text.slice(matchedTextLength).trim();
+    if (remaining) {
+      if (paragraphs.length > 0) {
+        paragraphs[paragraphs.length - 1] += " " + remaining;
+      } else {
+        paragraphs.push(remaining);
+      }
+    }
+  }
+
+  return paragraphs;
+}
+
 function AttendeeView({ sessionId }: { sessionId: string }) {
   const room = useRoomContext();
   const [currentLanguage, setCurrentLanguage] = useState("original");
@@ -31,6 +63,31 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
   const currentLanguageRef = useRef(currentLanguage);
   const audioTracks = useTracks([Track.Source.Microphone]);
   const [isOrganizerConnected, setIsOrganizerConnected] = useState(false);
+
+  const [fontSize, setFontSize] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("watch_font_size");
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 12 && parsed <= 28) {
+          return parsed;
+        }
+      }
+    }
+    return 16;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("watch_font_size", fontSize.toString());
+  }, [fontSize]);
+
+  const increaseFontSize = () => {
+    setFontSize((prev) => Math.min(prev + 2, 28));
+  };
+
+  const decreaseFontSize = () => {
+    setFontSize((prev) => Math.max(prev - 2, 12));
+  };
 
   // Track organizer connection status to avoid useRemoteParticipants hook overhead
   useEffect(() => {
@@ -381,13 +438,58 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
 
       {/* Transcription output */}
       <div style={{ padding: "28px 0" }}>
-        <span className="label" style={{ display: "block", marginBottom: 16 }}>
-          Transcription
-        </span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+          }}
+        >
+          <span className="label">Transcription</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={decreaseFontSize}
+              disabled={fontSize <= 12}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                color: "var(--fg-secondary)",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontFamily: "var(--font-mono)",
+                cursor: fontSize <= 12 ? "not-allowed" : "pointer",
+                opacity: fontSize <= 12 ? 0.4 : 1,
+                transition: "all 0.2s ease",
+              }}
+              title="Decrease font size"
+            >
+              A-
+            </button>
+            <button
+              onClick={increaseFontSize}
+              disabled={fontSize >= 28}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                color: "var(--fg-secondary)",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontFamily: "var(--font-mono)",
+                cursor: fontSize >= 28 ? "not-allowed" : "pointer",
+                opacity: fontSize >= 28 ? 0.4 : 1,
+                transition: "all 0.2s ease",
+              }}
+              title="Increase font size"
+            >
+              A+
+            </button>
+          </div>
+        </div>
 
         <div
           style={{
-            maxHeight: 240,
+            maxHeight: 320,
             overflowY: "auto",
             paddingRight: 8,
           }}
@@ -399,21 +501,28 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
                 : "Waiting for translated speech…"}
             </p>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {transcripts.map((t, i) => (
-                <p
-                  key={`${t.id}-${i}`}
-                  style={{
-                    fontFamily: "var(--font-body)",
-                    fontSize: 15,
-                    lineHeight: 1.6,
-                    color: t.final ? "var(--fg)" : "var(--fg-tertiary)",
-                    transition: "color 0.3s ease",
-                  }}
-                >
-                  {t.text}
-                </p>
-              ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {transcripts.map((t, i) => {
+                const paragraphs = splitIntoParagraphs(t.text, 2);
+                return (
+                  <div key={`${t.id}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {paragraphs.map((para, paraIdx) => (
+                      <p
+                        key={paraIdx}
+                        style={{
+                          fontFamily: "var(--font-body)",
+                          fontSize: `${fontSize}px`,
+                          lineHeight: 1.6,
+                          color: t.final ? "var(--fg)" : "var(--fg-tertiary)",
+                          transition: "color 0.3s ease, font-size 0.2s ease",
+                        }}
+                      >
+                        {para}
+                      </p>
+                    ))}
+                  </div>
+                );
+              })}
               <div ref={transcriptEndRef} />
             </div>
           )}
