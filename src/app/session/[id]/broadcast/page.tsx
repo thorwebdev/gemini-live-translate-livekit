@@ -9,6 +9,7 @@ import {
 import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
+import { getLanguageByCode } from "@/lib/languages";
 
 interface TranslationInfo {
   language: string;
@@ -16,18 +17,6 @@ interface TranslationInfo {
   status: string;
   subscriberCount: number;
 }
-
-const FLAGS: Record<string, string> = {
-  en: "🇺🇸", es: "🇪🇸", fr: "🇫🇷", de: "🇩🇪", it: "🇮🇹",
-  pt: "🇧🇷", ja: "🇯🇵", ko: "🇰🇷", zh: "🇨🇳", ar: "🇸🇦",
-  hi: "🇮🇳", ru: "🇷🇺", tr: "🇹🇷", nl: "🇳🇱", pl: "🇵🇱", sv: "🇸🇪",
-};
-
-const LANG_NAMES: Record<string, string> = {
-  en: "English", es: "Spanish", fr: "French", de: "German", it: "Italian",
-  pt: "Portuguese", ja: "Japanese", ko: "Korean", zh: "Chinese", ar: "Arabic",
-  hi: "Hindi", ru: "Russian", tr: "Turkish", nl: "Dutch", pl: "Polish", sv: "Swedish",
-};
 
 function BroadcastControls({
   sessionId,
@@ -579,25 +568,28 @@ function BroadcastControls({
             None yet — attendees can request them
           </p>
         ) : (
-          translations.map((t) => (
-            <div key={t.language} className="lang-row">
-              <div className="lang-row-left">
-                <span className="lang-flag">{FLAGS[t.language] || "🌐"}</span>
-                <span className="lang-name">
-                  {LANG_NAMES[t.language] || t.language.toUpperCase()}
-                </span>
+          translations.map((t) => {
+            const lang = getLanguageByCode(t.language);
+            return (
+              <div key={t.language} className="lang-row">
+                <div className="lang-row-left">
+                  <span className="lang-flag">{lang?.flag || "🌐"}</span>
+                  <span className="lang-name">
+                    {lang?.name || t.language.toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span className="lang-meta">
+                    {t.subscriberCount} listener{t.subscriberCount !== 1 ? "s" : ""}
+                  </span>
+                  <span className={`status status--${t.status === "active" ? "active" : "waiting"}`}>
+                    <span className="status-dot pulse" />
+                    {t.status}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span className="lang-meta">
-                  {t.subscriberCount} listener{t.subscriberCount !== 1 ? "s" : ""}
-                </span>
-                <span className={`status status--${t.status === "active" ? "active" : "waiting"}`}>
-                  <span className="status-dot pulse" />
-                  {t.status}
-                </span>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
